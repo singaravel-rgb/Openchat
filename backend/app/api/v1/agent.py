@@ -36,6 +36,7 @@ from app.services.conversation_service import (
     update_conversation_properties,
     assign_conversation as svc_assign,
 )
+from app.services.ai_service import get_or_create_ai_config, get_runtime_ai_config, retrieve_knowledge_hits, generate_with_provider, format_knowledge_context
 
 router = APIRouter(prefix="/agent", tags=["Agent Workspace"])
 
@@ -343,3 +344,58 @@ def list_agents(
             "capacity_remaining": max(0, (profile.max_conversations if profile else 5) - active_count),
         })
     return result
+
+
+@router.post("/conversations/{conversation_id}/ai-suggest")
+async def suggest_agent_reply(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+
+    messages = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc(), Message.id.asc())
+        .limit(20)
+        .all()
+    )
+
+    cfg = get_or_create_ai_config(db)
+    runtime = get_runtime_ai_config(db)
+
+    # Build context from recent conversation history
+    conversation_context: list[dict[str, str]] = []
+    last_customer_message = ""
+    for m in messages:
+        if m.sender_type.name == MessageSenderType.CUSTOMER.name or m.sender_type.name == MessageSenderType.AGENT.name:
+            prefix = "Customer: " if m.sender_type.name == MessageSenderType.CUSTOMER.name else "Agent: "
+            conversation_context.append({"role": "user" if m.sender_type.name == MessageSenderType.CUSTOMER.name else "assistant", "content": prefix + (m.content or "")})
+        elif m.sender_type.name == MessageSenderType.AI.name and not m.is_internal:
+            conversation_context.append({"role": "assistant", "content": f"AI: {m.content or ''}"})
+        if m.sender_type.name == MessageSenderType.CUSTOMER.name and not m.is_internal:
+            last_customer_message = m.content or ""
+
+    hits = retrieve_knowledge_hits(db, last_customer_message or conversation.subject or "", limit=3) if last_customer_message else []
+    knowledge_context = format_knowledge_context(hits) if hits else ""
+
+    history = conversation_context[-14:]
+    system = (
+        "You are a professional customer support agent assisting a human agent. "
+        "Draft a helpful, accurate, and empathetic customer support reply based on the conversation context. "
+        "Use only verified information; if unsure, ask a clarifying question or suggest escalation. "
+        "Keep it concise (2-4 short paragraphs max) and do not reveal internal notes."
+    )
+
+    answer, usage, provider_used = await generate_with_provider(runtime, system, history, hits, last_customer_message)
+
+    return {
+        "draft": answer,
+        "provider": provider_used,
+        "usage": usage,
+        "sources": [h.to_ref() for h in hits],
+    }

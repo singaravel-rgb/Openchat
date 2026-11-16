@@ -154,6 +154,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [agents, setAgents] = useState<Array<{ id: number; full_name: string; email: string }>>([]);
   const [retryCount, setRetryCount] = useState(0);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'subject'>('newest');
+  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
+  const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<HTMLDivElement>(null);
@@ -427,6 +429,25 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setError(err instanceof Error ? err.message : 'Failed to remove tag');
     }
   }, [selectedConversation, userRole, loadConversation, loadConversations]);
+
+  const handleGenerateAiSuggestion = useCallback(async () => {
+    if (!selectedConversation) {
+      setAiSuggestion(null);
+      return;
+    }
+    setIsGeneratingSuggestion(true);
+    setAiSuggestion(null);
+    try {
+      const api = userRole === 'admin' ? adminApi : agentApi;
+      const result = await api.suggestAgentReply(selectedConversation.id);
+      setAiSuggestion(result.draft ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate AI suggestion');
+      setAiSuggestion(null);
+    } finally {
+      setIsGeneratingSuggestion(false);
+    }
+  }, [selectedConversation, userRole]);
 
   const handleTake = useCallback(async () => {
     if (!selectedConversation) return;

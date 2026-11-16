@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Avatar } from '@/components/Avatar';
@@ -114,9 +114,10 @@ export function Sidebar({ user, navigation, onToggle }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const pathname = usePathname();
-  const { logout } = useAuth();
+  const { logout, isLoading, sessionExpired } = useAuth();
   const [isAvailable, setIsAvailable] = useState(user?.agent_profile?.is_available ?? false);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [workload, setWorkload] = useState<{ active: number; max: number; available: boolean } | null>(null);
 
   const toggleGroup = (label: string) => {
     setExpandedGroups((prev) => {
@@ -195,6 +196,23 @@ export function Sidebar({ user, navigation, onToggle }: SidebarProps) {
     return filterByRole(navigation);
   }, [navigation, user.role]);
 
+  // Fetch agent workload
+  useEffect(() => {
+    if (user.role === 'agent') {
+      const fetchWorkload = async () => {
+        try {
+          const data = await agentApi.getWorkload();
+          setWorkload(data);
+        } catch (err) {
+          console.error('Failed to fetch workload:', err);
+        }
+      };
+      fetchWorkload();
+      const interval = setInterval(fetchWorkload, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [user.role, user.id]);
+
   return (
     <aside
       className={`
@@ -251,6 +269,12 @@ export function Sidebar({ user, navigation, onToggle }: SidebarProps) {
                 <p className="font-medium truncate">{user.full_name}</p>
                 <p className="text-xs text-slate-500 capitalize">{user.role}</p>
               </div>
+            </div>
+          )}
+          {workload && !collapsed && user.role === 'agent' && (
+            <div className="mb-3 flex items-center justify-between rounded-lg bg-slate-900/60 px-3 py-2">
+              <span className="text-xs text-slate-400">Workload</span>
+              <span className="text-xs font-medium text-slate-200">{workload.active}/{workload.max}</span>
             </div>
           )}
           

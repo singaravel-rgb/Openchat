@@ -133,6 +133,9 @@ export const agentApi = {
   reopenConversation: (id: number) =>
     fetchApi<{ message: string }>(`/agent/conversations/${id}/reopen`, { method: 'POST' }),
 
+  suggestAgentReply: (id: number) =>
+    fetchApi<{ draft: string; provider: string; usage: Record<string, unknown>; sources: Array<{ type: string; id: number; title: string; excerpt: string | null; score: number }> }>(`/agent/conversations/${id}/ai-suggest`, { method: 'POST' }),
+
   getWorkload: () => fetchApi<AgentWorkload>('/agent/workload'),
 
   setAvailability: (isAvailable: boolean) =>
@@ -238,6 +241,9 @@ export const adminApi = {
 
   reopenConversation: (id: number) =>
     fetchApi<{ message: string }>(`/admin/conversations/${id}/reopen`, { method: 'POST' }),
+
+  suggestAgentReply: (id: number) =>
+    fetchApi<{ draft: string; provider: string; usage: Record<string, unknown>; sources: Array<{ type: string; id: number; title: string; excerpt: string | null; score: number }> }>(`/agent/conversations/${id}/ai-suggest`, { method: 'POST' }),
 
   // Categories
   listCategories: (includeInactive = false) =>
