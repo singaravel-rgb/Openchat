@@ -149,8 +149,11 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [resolveDetails, setResolveDetails] = useState('');
   const [showPriorityModal, setShowPriorityModal] = useState(false);
   const [newPriority, setNewPriority] = useState<string>('normal');
+  const [showTagModal, setShowTagModal] = useState(false);
+  const [newTag, setNewTag] = useState('');
   const [agents, setAgents] = useState<Array<{ id: number; full_name: string; email: string }>>([]);
   const [retryCount, setRetryCount] = useState(0);
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'subject'>('newest');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<HTMLDivElement>(null);
@@ -391,6 +394,40 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     }
   }, [selectedConversation, newPriority, userRole, loadConversation, loadConversations]);
 
+  const handleTagModalClose = useCallback(() => {
+    setShowTagModal(false);
+    setNewTag('');
+  }, []);
+
+  const handleTagAdd = useCallback(async () => {
+    if (!newTag.trim() || !selectedConversation) return;
+    try {
+      const api = userRole === 'admin' ? adminApi : agentApi;
+      await api.updateConversation(selectedConversation.id, {
+        tags: [...(selectedConversation.tags || []), newTag.trim()],
+      });
+      await loadConversation(selectedConversation.id);
+      await loadConversations();
+      handleTagModalClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add tag');
+    }
+  }, [selectedConversation, newTag, userRole, loadConversation, loadConversations]);
+
+  const handleTagRemove = useCallback(async (tag: string) => {
+    if (!selectedConversation) return;
+    const currentTags = selectedConversation.tags || [];
+    const newTags = currentTags.filter((t) => t !== tag);
+    try {
+      const api = userRole === 'admin' ? adminApi : agentApi;
+      await api.updateConversation(selectedConversation.id, { tags: newTags });
+      await loadConversation(selectedConversation.id);
+      await loadConversations();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove tag');
+    }
+  }, [selectedConversation, userRole, loadConversation, loadConversations]);
+
   const handleTake = useCallback(async () => {
     if (!selectedConversation) return;
     try {
@@ -408,16 +445,28 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
 
   const filteredConversations = useMemo(() => {
     const searchQuery = userRole === 'admin' ? adminFilters.q : searchTerm;
-    return conversations.filter((c) =>
+    const filtered = conversations.filter((c) =>
       (c.subject || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.customer_email || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [conversations, searchTerm, adminFilters.q, userRole]);
+    const sorted = [...filtered];
+    const timeOf = (c: ConversationListItem) => new Date(c.last_message_at || c.updated_at).getTime();
+    sorted.sort((a, b) => {
+      if (sortBy === 'subject') {
+        return (a.subject || '').localeCompare(b.subject || '');
+      }
+      if (sortBy === 'oldest') {
+        return timeOf(a) - timeOf(b);
+      }
+      return timeOf(b) - timeOf(a);
+    });
+    return sorted;
+  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy]);
 
   // Layout dimensions
-  const leftWidth = leftPanelCollapsed ? 64 : 320;
-  const rightWidth = rightPanelOpen ? 320 : 0;
+  const leftWidth = leftPanelCollapsed ? 64 : 360;
+  const rightWidth = rightPanelOpen ? 380 : 0;
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950">
@@ -442,9 +491,9 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       {/* Left Panel: Conversation List */}
       <aside
         className={`flex flex-col transition-all duration-300 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 overflow-hidden ${
-          leftPanelCollapsed ? 'w-16' : 'w-[320px]'
+          leftPanelCollapsed ? 'w-16' : 'w-[360px]'
         }`}
-        style={{ minWidth: leftPanelCollapsed ? 64 : 320, maxWidth: leftPanelCollapsed ? 64 : 320 }}
+        style={{ minWidth: leftPanelCollapsed ? 64 : 360, maxWidth: leftPanelCollapsed ? 64 : 360 }}
         aria-label="Conversation list"
       >
         {/* Panel Header */}
@@ -452,7 +501,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
           <div className="flex items-center justify-between w-full min-w-0">
             {!leftPanelCollapsed && (
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate">Conversations</h2>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{filteredConversations.length} Conversations</h2>
                 <Badge variant={queue === 'inbox' ? 'primary' : queue === 'pending' ? 'warning' : queue === 'assigned' ? 'info' : queue === 'unassigned' ? 'danger' : 'success'} className="text-xs flex-shrink-0">
                   {QUEUE_OPTIONS.find(q => q.value === queue)?.label}
                 </Badge>
@@ -546,6 +595,24 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   />
                 </>
               )}
+              <div className="flex flex-wrap gap-1 pt-1">
+                {(['newest', 'oldest', 'subject'] as const).map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setSortBy(opt)}
+                    className={`rounded border px-2 py-1 text-xs font-medium capitalize transition-colors ${
+                      sortBy === opt
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                    }`}
+                    aria-pressed={sortBy === opt}
+                    aria-label={`Sort by ${opt}`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -590,40 +657,46 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       size="md"
                       className="flex-shrink-0 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
                     />
-                    {!leftPanelCollapsed && (
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <span className={`text-sm font-medium truncate ${isSelected ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300'}`}>
-                            {conv.subject || 'No Subject'}
-                          </span>
-                          {hasUnread && (
-                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-medium flex items-center justify-center">
-                              {conv.unread_count > 99 ? '99+' : conv.unread_count}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-1">
-                          <span className="truncate flex-1">{conv.customer_name || 'Unknown Customer'}</span>
-                          <Badge variant={getStatusBadgeVariant(conv.status)} className="flex-shrink-0">
-                            {conv.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
-                          <span className="truncate flex-1">{conv.customer_email || ''}</span>
-                          {conv.assigned_agent_name && (
-                            <span className="flex-shrink-0">→ {conv.assigned_agent_name}</span>
-                          )}
-                          <span className="flex-shrink-0 ml-auto">
-                            {formatTimestamp(conv.last_message_at || conv.updated_at)}
-                          </span>
-                        </div>
-                        {conv.last_message && (
-                          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
-                            {conv.last_message}
+{!leftPanelCollapsed && (
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <span className={`text-sm font-medium truncate ${isSelected ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300'}`}>
+                                {conv.subject || 'No Subject'}
+                              </span>
+                              {hasUnread && (
+                                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-medium flex items-center justify-center">
+                                  {conv.unread_count > 99 ? '99+' : conv.unread_count}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-1">
+                              <span className="truncate flex-1">{conv.customer_name || 'Unknown Customer'}</span>
+                              {conv.assigned_agent_name && (
+                                <Badge variant="info" className="flex-shrink-0">
+                                  → {conv.assigned_agent_name}
+                                </Badge>
+                              )}
+                              {conv.tags && conv.tags.length > 0 && (
+                                <div className="flex items-center gap-1">
+                                  {conv.tags.map((tag, i) => (
+                                    <Badge key={tag} variant="default" className="text-xs">
+                                      {tag}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                              <span className="truncate flex-1">{conv.customer_email || ''}</span>
+                              {formatTimestamp(conv.last_message_at || conv.updated_at)}
+                            </div>
+                            {conv.last_message && (
+                              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
+                                {conv.last_message}
+                              </div>
+                            )}
                           </div>
                         )}
-                      </div>
-                    )}
                   </div>
                 </button>
               );
@@ -889,7 +962,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       {/* Right Panel: Conversation Details */}
       <aside
         className={`flex flex-col transition-all duration-300 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 overflow-hidden xl:flex ${rightPanelOpen ? '' : 'hidden xl:flex'}`}
-        style={{ width: rightPanelOpen ? 320 : 0, minWidth: rightPanelOpen ? 320 : 0, maxWidth: rightPanelOpen ? 320 : 0 }}
+        style={{ width: rightPanelOpen ? 380 : 0, minWidth: rightPanelOpen ? 380 : 0, maxWidth: rightPanelOpen ? 380 : 0 }}
         aria-label="Conversation details"
       >
         <div className="flex flex-col h-full">
@@ -959,14 +1032,31 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                         <Badge variant="info" className="capitalize">{selectedConversation.channel}</Badge>
                       </div>
                     )}
-                    {selectedConversation.tags && selectedConversation.tags.length > 0 && (
+                    {selectedConversation.tags && selectedConversation.tags.length > 0 ? (
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-600 dark:text-slate-400">Tags</span>
                         <div className="flex flex-wrap gap-1">
                           {selectedConversation.tags.map((tag) => (
-                            <Badge key={tag} variant="default" className="text-xs">{tag}</Badge>
+                            <Badge key={tag} variant="default" className="text-xs flex items-center gap-1">
+                              {tag}
+                              <button
+                                type="button"
+                                onClick={() => handleTagRemove(tag)}
+                                className="hover:text-red-500"
+                                aria-label={`Remove tag ${tag}`}
+                              >
+                                ✕
+                              </button>
+                            </Badge>
                           ))}
                         </div>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600 dark:text-slate-400">Tags</span>
+                        <Button variant="ghost" size="sm" onClick={() => setShowTagModal(true)} className="text-xs text-blue-600 dark:text-blue-400">
+                          + Add
+                        </Button>
                       </div>
                     )}
                     <div className="flex justify-between text-sm">
@@ -1139,6 +1229,44 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 </Button>
                 <Button onClick={handlePriorityChange}>
                   Update
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTagModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-md w-full">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Add Tag</h2>
+              <Button variant="ghost" size="sm" onClick={handleTagModalClose}>
+                ✕
+              </Button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Tag Name</label>
+                <Input
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  placeholder="e.g. billing, vip, urgent"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleTagAdd();
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <Button variant="secondary" onClick={handleTagModalClose}>
+                  Cancel
+                </Button>
+                <Button onClick={handleTagAdd} disabled={!newTag.trim()}>
+                  Add Tag
                 </Button>
               </div>
             </div>
