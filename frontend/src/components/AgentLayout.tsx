@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Sidebar, createNavigation } from '@/components/Sidebar';
 import { Button } from '@/components/Button';
+import { Input } from '@/components/Input';
 import { NotificationBell } from '@/components/NotificationBell';
 import { useRouter, usePathname } from 'next/navigation';
 import type { User } from '@/lib/types';
@@ -18,6 +19,7 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
   const router = useRouter();
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
+  const [globalSearch, setGlobalSearch] = useState('');
 
   useEffect(() => {
     setMounted(true);
@@ -97,11 +99,21 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
       <div className="lg:ml-64" style={{ minHeight: '100vh' }}>
         {!fullScreen && (
           <header className="sticky top-0 z-30 bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between px-6 py-4">
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                {getPageTitle(pathname)}
-              </h1>
-              <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between px-6 py-3">
+              <div className="flex items-center gap-3">
+                <h1 className="text-xl font-bold text-slate-900 dark:text-white">
+                  {getPageTitle(pathname)}
+                </h1>
+                <div className="hidden sm:block sm:w-64">
+                  <Input
+                    placeholder="Search conversations..."
+                    value={globalSearch}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGlobalSearch(e.target.value)}
+                    className="flex-1 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm placeholder-slate-400 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
                 <NotificationBell />
                 <Button variant="ghost" size="sm" onClick={logout}>
                   Logout
