@@ -1,0 +1,475 @@
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.api.dependencies import require_roles
+from app.core.enums import ConversationStatus, MessageSenderType, MessageType
+from app.core.security import hash_password
+from app.db.session import get_db
+from app.models.agent_profile import AgentProfile
+from app.models.audit_log import AuditLog
+from app.models.csat import CSATRating
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.user import User
+from app.schemas.conversation import (
+    ConversationListItem,
+    ConversationDetail,
+    ConversationUpdate,
+    AssignRequest,
+    StatusUpdateRequest,
+    MessageCreate,
+    MessageResponse,
+)
+from app.schemas.auth import UserCreate
+from app.services.conversation_service import (
+    build_conversation_list_item,
+    list_conversations_query,
+    ensure_can_view,
+    update_conversation_properties,
+    assign_conversation as svc_assign,
+    transition_status,
+    close_conversation as svc_close,
+    reopen_conversation as svc_reopen,
+    resolve_conversation as svc_resolve,
+    mark_conversation_read,
+)
+from app.services.sla_service import record_first_response
+
+router = APIRouter(prefix="/admin", tags=["Admin Workspace"])
+
+
+def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+    return current_user
+
+
+@router.get("/stats")
+def get_admin_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    total_conversations = db.query(Conversation).count()
+    pending_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.PENDING).count()
+    assigned_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.ASSIGNED).count()
+    ai_handling_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.AI_HANDLING).count()
+    resolved_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.RESOLVED).count()
+    closed_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.CLOSED).count()
+
+    total_agents = db.query(User).filter(User.role == "agent", User.is_active == True).count()  # noqa: E712
+    available_agents = (
+        db.query(User)
+        .join(AgentProfile, User.id == AgentProfile.user_id)
+        .filter(User.role == "agent", User.is_active == True, AgentProfile.is_available == True)  # noqa: E712
+        .count()
+    )
+
+    total_customers = db.query(User).filter(User.role == "customer", User.is_active == True).count()  # noqa: E712
+
+    today = datetime.utcnow().date()
+    conversations_today = (
+        db.query(Conversation)
+        .filter(func.date(Conversation.created_at) == today)
+        .count()
+    )
+
+    avg_resolution_time = None
+    resolved_convs = (
+        db.query(Conversation)
+        .filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
+        .all()
+    )
+    if resolved_convs:
+        total_hours = sum((c.updated_at - c.created_at).total_seconds() / 3600 for c in resolved_convs)
+        avg_resolution_time = round(total_hours / len(resolved_convs), 2)
+
+    return {
+        "conversations": {
+            "total": total_conversations,
+            "ai_handling": ai_handling_conversations,
+            "pending": pending_conversations,
+            "assigned": assigned_conversations,
+            "resolved": resolved_conversations,
+            "closed": closed_conversations,
+            "today": conversations_today,
+        },
+        "agents": {
+            "total": total_agents,
+            "available": available_agents,
+            "busy": total_agents - available_agents,
+        },
+        "customers": {"total": total_customers},
+        "avg_resolution_hours": avg_resolution_time,
+    }
+
+
+@router.get("/agents")
+def list_agents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    agents = db.query(User).filter(User.role == "agent", User.is_active == True).all()  # noqa: E712
+    result = []
+    for agent in agents:
+        profile = agent.agent_profile
+        active_count = (
+            db.query(Conversation)
+            .filter(
+                Conversation.assigned_agent_id == agent.id,
+                Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),
+            )
+            .count()
+        )
+        result.append({
+            "id": agent.id,
+            "email": agent.email,
+            "full_name": agent.full_name,
+            "is_active": agent.is_active,
+            "is_approved": profile.is_approved if profile else False,
+            "is_available": profile.is_available if profile else False,
+            "max_conversations": profile.max_conversations if profile else 5,
+            "active_conversations": active_count,
+            "capacity_remaining": max(0, (profile.max_conversations if profile else 5) - active_count),
+        })
+    return result
+
+
+@router.patch("/agents/{agent_id}/availability")
+def set_agent_availability_admin(
+    agent_id: int,
+    is_available: bool,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    agent = db.query(User).filter(User.id == agent_id, User.role == "agent").first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    profile = agent.agent_profile
+    if not profile:
+        profile = AgentProfile(user_id=agent.id, is_available=is_available)
+        db.add(profile)
+    else:
+        profile.is_available = is_available
+    db.commit()
+    return {"message": f"Agent {agent.full_name} availability set to {'available' if is_available else 'unavailable'}"}
+
+
+@router.patch("/agents/{agent_id}/max-conversations")
+def set_agent_max_conversations(
+    agent_id: int,
+    max_conversations: int = Query(..., ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    agent = db.query(User).filter(User.id == agent_id, User.role == "agent").first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    profile = agent.agent_profile
+    if not profile:
+        profile = AgentProfile(user_id=agent.id, max_conversations=max_conversations)
+        db.add(profile)
+    else:
+        profile.max_conversations = max_conversations
+    db.commit()
+    return {"message": f"Agent {agent.full_name} max conversations set to {max_conversations}"}
+
+
+@router.get("/agents/pending")
+def list_pending_agents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    agents = (
+        db.query(User)
+        .join(AgentProfile, User.id == AgentProfile.user_id)
+        .filter(User.role == "agent", User.is_active == True, AgentProfile.is_approved == False)  # noqa: E712
+        .all()
+    )
+    result = []
+    for agent in agents:
+        profile = agent.agent_profile
+        result.append({
+            "id": agent.id,
+            "email": agent.email,
+            "full_name": agent.full_name,
+            "created_at": agent.created_at.isoformat() if agent.created_at else None,
+            "is_available": profile.is_available if profile else False,
+            "max_conversations": profile.max_conversations if profile else 5,
+        })
+    return result
+
+
+@router.post("/agents/{agent_id}/approve")
+def approve_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    agent = db.query(User).filter(User.id == agent_id, User.role == "agent").first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    profile = agent.agent_profile
+    if not profile:
+        profile = AgentProfile(user_id=agent.id, is_approved=True, is_available=True)
+        db.add(profile)
+    else:
+        profile.is_approved = True
+    db.commit()
+    db.refresh(profile)
+    return {
+        "message": f"Agent {agent.full_name} approved",
+        "agent_id": agent.id,
+        "is_approved": profile.is_approved,
+    }
+
+
+@router.post("/agents/{agent_id}/reject")
+def reject_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    agent = db.query(User).filter(User.id == agent_id, User.role == "agent").first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    agent.is_active = False
+    profile = agent.agent_profile
+    if profile:
+        profile.is_approved = False
+        profile.is_available = False
+    db.commit()
+    return {
+        "message": f"Agent {agent.full_name} rejected and deactivated",
+        "agent_id": agent.id,
+        "is_active": agent.is_active,
+    }
+
+
+@router.get("/conversations", response_model=list[ConversationListItem])
+def list_all_conversations_admin(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    agent_id: Optional[int] = Query(None),
+    customer_id: Optional[int] = Query(None),
+    q: Optional[str] = Query(None),
+    limit: int = Query(50, le=200, ge=1),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    items, _ = list_conversations_query(db, viewer=current_user, status_filter=status_filter, agent_id=agent_id, customer_id=customer_id, q=q, limit=limit, offset=offset)
+    return [build_conversation_list_item(db, c, viewer=current_user) for c in items]
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+def get_conversation_admin(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+
+    messages = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc(), Message.id.asc())
+        .all()
+    )
+    mark_conversation_read(db, conversation, "agent")
+    db.commit()
+    db.refresh(conversation)
+
+    return ConversationDetail(
+        id=conversation.id,
+        customer_id=conversation.customer_id,
+        assigned_agent_id=conversation.assigned_agent_id,
+        subject=conversation.subject,
+        status=conversation.status,
+        channel=conversation.channel,
+        priority=getattr(conversation, "priority", "normal"),
+        tags=getattr(conversation, "tags", []) or [],
+        resolution_details=getattr(conversation, "resolution_details", None),
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        resolved_at=getattr(conversation, "resolved_at", None),
+        closed_at=getattr(conversation, "closed_at", None),
+        customer_last_read_at=getattr(conversation, "customer_last_read_at", None),
+        agent_last_read_at=getattr(conversation, "agent_last_read_at", None),
+        assignment_history=getattr(conversation, "assignment_history", []) or [],
+        messages=[MessageResponse.model_validate(m) for m in messages],
+    )
+
+
+@router.patch("/conversations/{conversation_id}")
+def update_conversation_admin(
+    conversation_id: int,
+    data: ConversationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    update_conversation_properties(db, conversation, current_user, subject=data.subject, priority=data.priority, tags=data.tags)
+    db.commit()
+    db.refresh(conversation)
+    return {"message": "Conversation updated"}
+
+
+@router.post("/conversations/{conversation_id}/assign")
+def assign_conversation_admin(
+    conversation_id: int,
+    data: AssignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    svc_assign(db, conversation, current_user, data.agent_id, note=data.note)
+    db.commit()
+    return {"message": "Conversation assignment updated"}
+
+
+@router.post("/conversations/{conversation_id}/status")
+def update_conversation_status_admin(
+    conversation_id: int,
+    data: StatusUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not data.status:
+        raise HTTPException(status_code=400, detail="status is required")
+    if data.status == ConversationStatus.RESOLVED:
+        svc_resolve(db, conversation, current_user, resolution_details=data.resolution_details)
+    elif data.status == ConversationStatus.CLOSED:
+        svc_close(db, conversation, current_user, resolution_details=data.resolution_details)
+    elif data.status in (ConversationStatus.PENDING, ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING):
+        if data.status == ConversationStatus.ASSIGNED and not conversation.assigned_agent_id:
+            raise HTTPException(status_code=409, detail="Assign an agent before setting status to assigned")
+        if conversation.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
+            svc_reopen(db, conversation, current_user)
+            if data.status != conversation.status:
+                transition_status(db, conversation, data.status, current_user)
+        else:
+            transition_status(db, conversation, data.status, current_user)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported status")
+    db.commit()
+    return {"message": "Conversation status updated"}
+
+
+@router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
+def send_admin_message(
+    conversation_id: int,
+    data: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
+        raise HTTPException(status_code=409, detail="This conversation is no longer accepting messages")
+    if data.client_message_id:
+        existing = db.query(Message).filter(Message.conversation_id == conversation_id, Message.client_message_id == data.client_message_id, Message.sender_id == current_user.id).first()
+        if existing:
+            return existing
+    now = datetime.utcnow()
+    msg = Message(
+        conversation_id=conversation.id,
+        sender_id=current_user.id,
+        sender_type=MessageSenderType.AGENT,
+        message_type=MessageType.INTERNAL_NOTE if data.is_internal else MessageType.TEXT,
+        content=data.content,
+        is_internal=data.is_internal,
+        delivery_status="delivered",
+        processed_at=now,
+        client_message_id=data.client_message_id,
+    )
+    db.add(msg)
+    conversation.updated_at = now
+    if not data.is_internal:
+        record_first_response(db, conversation)
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
+@router.post("/conversations/{conversation_id}/reopen")
+def reopen_conversation_admin(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    svc_reopen(db, conversation, current_user)
+    db.commit()
+    return {"message": "Conversation reopened successfully"}
+
+
+@router.get("/csat")
+def get_csat_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Get CSAT metrics: average rating, distribution, total ratings."""
+    ratings = db.query(CSATRating).all()
+    if not ratings:
+        return {
+            "average_rating": 0,
+            "total_ratings": 0,
+            "distribution": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+        }
+
+    total = len(ratings)
+    avg = sum(r.rating for r in ratings) / total
+    distribution = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for r in ratings:
+        distribution[r.rating] += 1
+
+    return {
+        "average_rating": round(avg, 2),
+        "total_ratings": total,
+        "distribution": distribution,
+    }
+
+
+@router.get("/audit-logs")
+def get_audit_logs(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Get audit logs for admin actions."""
+    logs = (
+        db.query(AuditLog)
+        .order_by(AuditLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for log in logs:
+        result.append({
+            "id": log.id,
+            "user_id": log.user_id,
+            "action": log.action,
+            "resource_type": log.resource_type,
+            "resource_id": log.resource_id,
+            "details": log.details,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        })
+    return result

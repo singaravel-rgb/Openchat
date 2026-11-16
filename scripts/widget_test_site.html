@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenChat Widget Test Site</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 40px 20px 120px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>External Website (Widget Embed Test)</h1>
+    <div class="card">
+      <p>This page simulates an external website embedding the OpenChat widget.</p>
+      <p>Expected flow: open launcher → start conversation → send message → receive AI response → request human → verify pending/assignment behavior → agent replies visible → refresh restores session.</p>
+      <p>Backend: <code>http://localhost:8000</code> · Frontend app: <code>http://localhost:3000</code></p>
+    </div>
+    <div class="card">
+      <h2>Sample content</h2>
+      <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. The floating widget should appear in the configured corner and work on desktop/mobile widths.</p>
+    </div>
+  </div>
+
+  <!-- OpenChat widget embed snippet -->
+  <script src="http://localhost:8000/api/v1/widget/embed.js" async></script>
+</body>
+</html>

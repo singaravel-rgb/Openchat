@@ -1,13 +1,19 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, Index, Index, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.enums import MessageSenderType, MessageType
 from app.db.base import Base
 
 
 class Message(Base):
     __tablename__ = "messages"
+
+    __table_args__ = (
+        Index("ix_messages_client_message_id", "client_message_id"),
+        Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -30,8 +36,8 @@ class Message(Base):
 
     message_type: Mapped[str] = mapped_column(
         String(20),
-        default="text",
-        server_default="text",
+        default=MessageType.TEXT,
+        server_default=MessageType.TEXT,
         nullable=False,
     )
 
@@ -46,6 +52,19 @@ class Message(Base):
         server_default="false",
         nullable=False,
     )
+
+    delivery_status: Mapped[str] = mapped_column(
+        String(20),
+        default="delivered",
+        server_default="delivered",
+        nullable=False,
+    )
+
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    client_message_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    ai_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

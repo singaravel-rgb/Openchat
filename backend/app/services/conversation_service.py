@@ -1,0 +1,526 @@
+﻿from datetime import datetime, timezone
+from typing import Optional, List, Tuple
+from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, and_, distinct
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException, status
+
+from app.models.conversation import Conversation, ConversationStatus
+from app.models.message import Message, MessageType, MessageSenderType
+from app.models.user import User
+from app.models.agent_profile import AgentProfile
+from app.models.ai import AIConfig
+from app.schemas.conversation import ConversationCreate, ConversationUpdate
+from app.services.sla_service import apply_sla_to_conversation
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def list_conversations_query(
+    db: Session,
+    *,
+    viewer: User,
+    status_filter: Optional[str] = None,
+    queue: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+    q: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> Tuple[List[Conversation], int]:
+    query = db.query(Conversation)
+
+    if viewer.role == "customer":
+        query = query.filter(Conversation.customer_id == viewer.id)
+    elif viewer.role == "agent":
+        if queue == "inbox":
+            query = query.filter(Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]))
+        elif queue == "pending":
+            query = query.filter(Conversation.status == ConversationStatus.PENDING)
+        elif queue == "assigned":
+            query = query.filter(
+                Conversation.assigned_agent_id == viewer.id,
+                Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),
+            )
+        elif queue == "unassigned":
+            query = query.filter(
+                Conversation.assigned_agent_id.is_(None),
+                Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]),
+            )
+        elif queue == "resolved":
+            query = query.filter(
+                Conversation.assigned_agent_id == viewer.id,
+                Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]),
+            )
+        else:
+            query = query.filter(or_(
+                Conversation.assigned_agent_id == viewer.id,
+                Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]),
+            ))
+    else:  # admin
+        if queue == "inbox":
+            query = query.filter(Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]))
+        elif queue == "pending":
+            query = query.filter(Conversation.status == ConversationStatus.PENDING)
+        elif queue == "assigned":
+            query = query.filter(Conversation.status == ConversationStatus.ASSIGNED)
+        elif queue == "unassigned":
+            query = query.filter(
+                Conversation.assigned_agent_id.is_(None),
+                Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]),
+            )
+        elif queue == "resolved":
+            query = query.filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
+        if agent_id:
+            query = query.filter(Conversation.assigned_agent_id == agent_id)
+        if customer_id:
+            query = query.filter(Conversation.customer_id == customer_id)
+
+    if status_filter:
+        query = query.filter(Conversation.status == status_filter)
+
+    if q:
+        like = f"%{q}%"
+        # Use subquery to get distinct conversation IDs first (avoids JSON comparison issues with DISTINCT)
+        subq = (
+            db.query(Conversation.id)
+            .join(User, User.id == Conversation.customer_id)
+            .outerjoin(Message, Message.conversation_id == Conversation.id)
+            .filter(or_(
+                Conversation.subject.ilike(like),
+                User.full_name.ilike(like),
+                User.email.ilike(like),
+                and_(Message.is_internal == False, Message.content.ilike(like)),  # noqa: E712
+            ))
+            .distinct()
+            .subquery()
+        )
+        query = query.filter(Conversation.id.in_(subq))
+
+    total = query.with_entities(func.count(func.distinct(Conversation.id))).scalar() if q else query.count()
+    items = query.order_by(Conversation.updated_at.desc(), Conversation.id.desc()).offset(offset).limit(limit).all()
+    return items, int(total or 0)
+
+
+ALLOWED_TRANSITIONS = {
+    ConversationStatus.AI_HANDLING: {ConversationStatus.ASSIGNED, ConversationStatus.PENDING, ConversationStatus.RESOLVED, ConversationStatus.CLOSED},
+    ConversationStatus.PENDING: {ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING, ConversationStatus.RESOLVED, ConversationStatus.CLOSED},
+    ConversationStatus.ASSIGNED: {ConversationStatus.PENDING, ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.AI_HANDLING},
+    ConversationStatus.RESOLVED: {ConversationStatus.PENDING, ConversationStatus.CLOSED, ConversationStatus.ASSIGNED},
+    ConversationStatus.CLOSED: {ConversationStatus.PENDING},
+}
+
+
+def transition_status(
+    db: Session,
+    conversation: Conversation,
+    new_status: str,
+    actor: User,
+    resolution_details: Optional[str] = None
+) -> Conversation:
+    current = conversation.status
+    if current == new_status:
+        if resolution_details is not None and new_status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
+            conversation.resolution_details = resolution_details
+        return conversation
+
+    allowed = ALLOWED_TRANSITIONS.get(ConversationStatus(current), set())
+    if ConversationStatus(new_status) not in allowed and new_status not in {s.value for s in allowed}:
+        raise HTTPException(status_code=409, detail=f"Invalid status transition: {current} -> {new_status}")
+
+    if conversation.assigned_agent_id and current in (ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING) and new_status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.PENDING):
+        # release capacity when leaving active assignment
+        release_agent_capacity(db, conversation.assigned_agent_id)
+        if new_status == ConversationStatus.PENDING:
+            conversation.assigned_agent_id = None
+
+    conversation.status = new_status
+    conversation.updated_at = _utcnow()
+    if new_status == ConversationStatus.RESOLVED:
+        conversation.resolved_at = conversation.resolved_at or _utcnow()
+        conversation.closed_at = None
+        if resolution_details is not None:
+            conversation.resolution_details = resolution_details
+        record_resolution(db, conversation)
+    elif new_status == ConversationStatus.CLOSED:
+        conversation.closed_at = _utcnow()
+        if not conversation.resolved_at:
+            conversation.resolved_at = _utcnow()
+        if resolution_details is not None:
+            conversation.resolution_details = resolution_details
+        record_resolution(db, conversation)
+    elif new_status in (ConversationStatus.ASSIGNED, ConversationStatus.PENDING, ConversationStatus.AI_HANDLING):
+        if current in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
+            conversation.closed_at = None
+            conversation.resolved_at = None
+            conversation.sla_resolution_breached = False
+
+    record_system_event(db, conversation, f"Status changed from {current} to {new_status} by {actor.full_name}", actor_id=actor.id)
+    return conversation
+
+
+def update_conversation_properties(
+    db: Session,
+    conversation: Conversation,
+    actor: User,
+    *,
+    subject=None,
+    priority=None,
+    tags=None
+) -> Conversation:
+    changed = []
+    if subject is not None and subject != conversation.subject:
+        conversation.subject = subject
+        changed.append("subject")
+    if priority is not None and priority != getattr(conversation, "priority", "normal"):
+        conversation.priority = priority
+        changed.append("priority")
+    if tags is not None:
+        new_tags = ensure_tags(tags)
+        if new_tags != getattr(conversation, "tags", []):
+            conversation.tags = new_tags
+            changed.append("tags")
+
+    if changed:
+        conversation.updated_at = _utcnow()
+        record_system_event(db, conversation, f"Updated: {', '.join(changed)} by {actor.full_name}", actor_id=actor.id)
+
+    return conversation
+
+
+def ensure_tags(tags) -> list[str]:
+    if isinstance(tags, str):
+        import json
+        try:
+            parsed = json.loads(tags)
+            if isinstance(parsed, list):
+                return [str(t) for t in parsed]
+        except Exception:
+            return [t.strip() for t in tags.split(",") if t.strip()]
+    if isinstance(tags, list):
+        return [str(t) for t in tags]
+    return []
+
+
+def record_system_event(db: Session, conversation: Conversation, content: str, actor_id: int | None = None) -> Message:
+    msg = Message(
+        conversation_id=conversation.id,
+        sender_id=actor_id,
+        sender_type=MessageSenderType.SYSTEM,
+        message_type=MessageType.SYSTEM_EVENT,
+        content=content,
+        is_internal=True,
+    )
+    db.add(msg)
+    return msg
+
+
+def record_resolution(db: Session, conversation: Conversation) -> Message:
+    return record_system_event(db, conversation, f"Conversation resolved", actor_id=conversation.assigned_agent_id)
+
+
+def release_agent_capacity(db: Session, agent_id: int) -> None:
+    profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent_id).first()
+    if profile:
+        profile.active_conversations = max(0, profile.active_conversations - 1)
+
+
+def assign_conversation(db: Session, conversation: Conversation, actor: User, agent_id: int, note: Optional[str] = None) -> Conversation:
+    agent = db.query(User).filter(User.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    old_agent_id = conversation.assigned_agent_id
+    if old_agent_id and old_agent_id != agent.id:
+        release_agent_capacity(db, old_agent_id)
+
+    conversation.assigned_agent_id = agent.id
+    conversation.status = ConversationStatus.ASSIGNED
+    conversation.updated_at = _utcnow()
+
+    profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
+    if profile:
+        profile.active_conversations += 1
+
+    if note:
+        record_system_event(db, conversation, f"Assigned to {agent.full_name}: {note}", actor_id=actor.id)
+    else:
+        record_system_event(db, conversation, f"Assigned to {agent.full_name}", actor_id=actor.id)
+
+    return conversation
+
+
+def create_conversation(db: Session, data: ConversationCreate, customer: User) -> Conversation:
+    conversation = Conversation(
+        customer_id=customer.id,
+        subject=data.subject,
+        priority=data.priority or "normal",
+        tags=data.tags or [],
+        channel=data.channel or "web",
+    )
+    db.add(conversation)
+    db.flush()
+
+    record_system_event(db, conversation, "Conversation created")
+    return conversation
+
+
+def take_conversation(db: Session, conversation: Conversation, agent: User) -> Conversation:
+    if conversation.assigned_agent_id and conversation.assigned_agent_id != agent.id:
+        raise HTTPException(status_code=409, detail="Conversation already assigned to another agent")
+
+    if conversation.status not in (ConversationStatus.AI_HANDLING, ConversationStatus.PENDING):
+        raise HTTPException(status_code=409, detail="Conversation cannot be taken")
+
+    profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
+    if profile and profile.active_conversations >= profile.max_conversations:
+        raise HTTPException(status_code=409, detail="Agent at capacity")
+
+    return assign_conversation(db, conversation, agent, agent.id)
+
+
+def add_message(
+    db: Session,
+    conversation: Conversation,
+    sender: User,
+    content: str,
+    is_internal: bool = False,
+    message_type: MessageType = MessageType.TEXT,
+    client_message_id: Optional[str] = None,
+) -> Message:
+    message = Message(
+        conversation_id=conversation.id,
+        sender_id=sender.id,
+        sender_type=MessageSenderType.AGENT if sender.role in ("agent", "admin") else MessageSenderType.CUSTOMER,
+        message_type=message_type,
+        content=content,
+        is_internal=is_internal,
+        client_message_id=client_message_id,
+    )
+    db.add(message)
+
+    conversation.updated_at = _utcnow()
+    conversation.last_message_at = _utcnow()
+
+    if not is_internal:
+        if sender.role == "customer":
+            conversation.customer_last_read_at = _utcnow()
+        else:
+            conversation.agent_last_read_at = _utcnow()
+
+    return message
+
+
+def reopen_conversation(db: Session, conversation: Conversation, actor: User) -> Conversation:
+    if conversation.status not in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
+        raise HTTPException(status_code=409, detail="Conversation is not resolved or closed")
+
+    return transition_status(db, conversation, ConversationStatus.PENDING.value, actor)
+
+
+def ensure_can_view(user: User, conversation: Conversation) -> None:
+    """Check if user can view this conversation."""
+    if user.role == "customer" and conversation.customer_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this conversation")
+    elif user.role == "agent":
+        # Agents can view if assigned or if in inbox/pending queues
+        if conversation.assigned_agent_id != user.id and conversation.status not in (
+            ConversationStatus.AI_HANDLING, ConversationStatus.PENDING
+        ):
+            raise HTTPException(status_code=403, detail="Not authorized to view this conversation")
+
+
+def ensure_can_modify(user: User, conversation: Conversation) -> None:
+    """Check if user can modify this conversation (send messages, etc.)."""
+    ensure_can_view(user, conversation)
+    if user.role == "agent" and conversation.assigned_agent_id != user.id:
+        if conversation.status not in (ConversationStatus.AI_HANDLING, ConversationStatus.PENDING):
+            raise HTTPException(status_code=403, detail="Not assigned to this conversation")
+
+
+def get_visible_messages(
+    db: Session,
+    conversation_id: int,
+    user: User,
+    limit: int = 500,
+    offset: int = 0
+) -> List[Message]:
+    """Get messages visible to the user (filter internal notes for customers)."""
+    include_internal = user.role in ("agent", "admin")
+    messages_q = db.query(Message).filter(Message.conversation_id == conversation_id)
+    if not include_internal:
+        messages_q = messages_q.filter(Message.is_internal == False)  # noqa: E712
+    return messages_q.order_by(Message.created_at.asc(), Message.id.asc()).offset(offset).limit(limit).all()
+
+
+def build_conversation_list_item(db: Session, conversation: Conversation, viewer: User):
+    """Build a ConversationListItem from a Conversation with related data."""
+    # Get last message
+    last_msg = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation.id, Message.is_internal == False)  # noqa: E712
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    
+    # Get unread count for customer
+    unread = 0
+    if viewer.role == "customer":
+        unread = db.query(Message).filter(
+            Message.conversation_id == conversation.id,
+            Message.is_internal == False,  # noqa: E712
+            Message.sender_type != MessageSenderType.CUSTOMER,
+            Message.created_at > (conversation.customer_last_read_at or datetime.min.replace(tzinfo=timezone.utc))
+        ).count()
+    elif viewer.role == "agent":
+        unread = db.query(Message).filter(
+            Message.conversation_id == conversation.id,
+            Message.is_internal == False,  # noqa: E712
+            Message.sender_type == MessageSenderType.CUSTOMER,
+            Message.created_at > (conversation.agent_last_read_at or datetime.min.replace(tzinfo=timezone.utc))
+        ).count()
+
+    return {
+        "id": conversation.id,
+        "customer_id": conversation.customer_id,
+        "assigned_agent_id": conversation.assigned_agent_id,
+        "subject": conversation.subject,
+        "status": conversation.status,
+        "channel": conversation.channel,
+        "priority": getattr(conversation, "priority", "normal"),
+        "tags": getattr(conversation, "tags", []) or [],
+        "resolution_details": getattr(conversation, "resolution_details", None),
+        "created_at": conversation.created_at,
+        "updated_at": conversation.updated_at,
+        "resolved_at": getattr(conversation, "resolved_at", None),
+        "closed_at": getattr(conversation, "closed_at", None),
+        "customer_last_read_at": getattr(conversation, "customer_last_read_at", None),
+        "agent_last_read_at": getattr(conversation, "agent_last_read_at", None),
+        "customer_name": getattr(conversation.customer, "full_name", "Unknown"),
+        "customer_email": getattr(conversation.customer, "email", ""),
+        "assigned_agent_name": getattr(conversation.assigned_agent, "full_name", None) if conversation.assigned_agent else None,
+        "last_message": last_msg.content if last_msg else None,
+        "last_message_at": last_msg.created_at if last_msg else None,
+        "unread_count": unread,
+    }
+
+
+def mark_conversation_read(db: Session, conversation: Conversation, role: str) -> None:
+    """Mark conversation as read for the given role."""
+    now = _utcnow()
+    if role == "customer":
+        conversation.customer_last_read_at = now
+    elif role == "agent":
+        conversation.agent_last_read_at = now
+
+
+async def process_customer_message(
+    db: Session,
+    conversation: Conversation,
+    customer: User,
+    content: str,
+    client_message_id: Optional[str] = None
+) -> Message:
+    """Process a customer message: save it, trigger AI response if applicable.
+    
+    If client_message_id is provided and a message with that ID already exists
+    for this conversation, return the existing message (idempotency).
+    """
+    # Check for existing message with same client_message_id (idempotency)
+    if client_message_id:
+        existing_msg = (
+            db.query(Message)
+            .filter(
+                Message.conversation_id == conversation.id,
+                Message.client_message_id == client_message_id,
+            )
+            .first()
+        )
+        if existing_msg:
+            return existing_msg
+
+    # Save customer message
+    customer_msg = add_message(
+        db, conversation, customer, content,
+        is_internal=False,
+        message_type=MessageType.TEXT,
+        client_message_id=client_message_id
+    )
+    db.flush()
+
+    # If conversation is in AI_HANDLING status, trigger AI response
+    if conversation.status == ConversationStatus.AI_HANDLING:
+        try:
+            from app.services.ai_service import process_ai_turn
+            result = await process_ai_turn(db, conversation, [], customer)
+            if result and result.answer:
+                ai_msg = Message(
+                    conversation_id=conversation.id,
+                    sender_id=None,
+                    sender_type=MessageSenderType.AI,
+                    message_type=MessageType.TEXT,
+                    content=result.answer,
+                    is_internal=False,
+                )
+                db.add(ai_msg)
+        except Exception:
+            # Log error but don't fail the customer message
+            import logging
+            logging.getLogger(__name__).exception("AI response failed")
+
+    db.commit()
+    db.refresh(customer_msg)
+    return customer_msg
+
+
+def append_assignment_history(db: Session, conversation: Conversation, agent_id: int, action: str) -> None:
+    """Append an entry to the conversation's assignment history."""
+    history = conversation.assignment_history or []
+    history.append({
+        "agent_id": agent_id,
+        "action": action,
+        "timestamp": _utcnow().isoformat(),
+    })
+    conversation.assignment_history = history
+
+
+def resolve_conversation(db: Session, conversation: Conversation, actor: User, resolution_details: Optional[str] = None) -> Conversation:
+    """Resolve a conversation."""
+    return transition_status(db, conversation, ConversationStatus.RESOLVED.value, actor, resolution_details)
+
+
+def close_conversation(db: Session, conversation: Conversation, actor: User, resolution_details: Optional[str] = None) -> Conversation:
+    """Close a conversation."""
+    return transition_status(db, conversation, ConversationStatus.CLOSED.value, actor, resolution_details)
+
+
+def get_last_public_message(db: Session, conversation_id: int):
+    """Get the last non-internal message for a conversation."""
+    return (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id, Message.is_internal == False)  # noqa: E712
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+
+
+def compute_unread_count(db: Session, conversation: Conversation, role: str) -> int:
+    """Compute unread message count for a role."""
+    if role == "customer":
+        last_read = conversation.customer_last_read_at or datetime.min.replace(tzinfo=timezone.utc)
+        return db.query(Message).filter(
+            Message.conversation_id == conversation.id,
+            Message.is_internal == False,  # noqa: E712
+            Message.sender_type != MessageSenderType.CUSTOMER,
+            Message.created_at > last_read
+        ).count()
+    elif role == "agent":
+        last_read = conversation.agent_last_read_at or datetime.min.replace(tzinfo=timezone.utc)
+        return db.query(Message).filter(
+            Message.conversation_id == conversation.id,
+            Message.is_internal == False,  # noqa: E712
+            Message.sender_type == MessageSenderType.CUSTOMER,
+            Message.created_at > last_read
+        ).count()
+    return 0

@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
+from app.core.redis import redis_client
 from app.core.security import (
     create_access_token,
     hash_password,
@@ -14,6 +17,10 @@ from app.schemas.auth import UserCreate, UserResponse, Token
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+# Brute-force protection settings
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_WINDOW_SECONDS = 900  # 15 minutes
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -47,9 +54,27 @@ def register(
 
 @router.post("/login", response_model=Token)
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
+    client_ip = request.client.host if request.client else "unknown"
+    lock_key = f"login_lock:{client_ip}:{form_data.username.lower()}"
+    attempt_key = f"login_attempts:{client_ip}:{form_data.username.lower()}"
+
+    # Check if locked out
+    try:
+        locked = redis_client.get(lock_key)
+        if locked:
+            ttl = redis_client.ttl(lock_key)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Account locked due to multiple failed login attempts. Try again in {ttl} seconds.",
+                headers={"Retry-After": str(ttl)},
+            )
+    except Exception:
+        pass  # Redis unavailable: fail open
+
     user = db.query(User).filter(
         User.email == form_data.username
     ).first()
@@ -58,6 +83,18 @@ def login(
         form_data.password,
         user.password_hash,
     ):
+        # Increment failed attempts
+        try:
+            pipe = redis_client.pipeline()
+            pipe.incr(attempt_key)
+            pipe.expire(attempt_key, LOCKOUT_WINDOW_SECONDS)
+            results = pipe.execute()
+            attempts = results[0]
+            if attempts >= MAX_FAILED_ATTEMPTS:
+                redis_client.setex(lock_key, LOCKOUT_WINDOW_SECONDS, "1")
+        except Exception:
+            pass
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -69,6 +106,12 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is inactive",
         )
+
+    # Reset failed attempts on successful login
+    try:
+        redis_client.delete(attempt_key, lock_key)
+    except Exception:
+        pass
 
     access_token = create_access_token(str(user.id))
 

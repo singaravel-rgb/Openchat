@@ -8,6 +8,23 @@ from app.db.base import Base
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.agent_profile import AgentProfile
+from app.models.csat import CSATRating
+from app.models.audit_log import AuditLog
+from app.models.knowledge import Category, Article, FAQ
+from app.models.notification import Notification
+from app.models.widget import WidgetConfig, WidgetSession
+from app.models.ai import AIConfig, AIUsageLog
+from app.models.setting import Setting
+from app.models.attachment import Attachment
+from app.models.canned_response import CannedResponse
+from app.models.custom_field import CustomField, ConversationCustomField
+from app.models.team import Department, Team, user_team_membership
+from app.models.business_hours import BusinessHours, Holiday
+from app.models.bot_flow import BotFlow, BotFlowIssue, BotFlowStep
+from app.models.webhook import Webhook, WebhookDelivery
+from app.models.automation_rule import AutomationRule, AutomationRuleExecution
+from app.models.campaign import Campaign, CampaignMessage
 config = context.config
 
 if config.config_file_name is not None:

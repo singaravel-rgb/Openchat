@@ -1,0 +1,183 @@
+﻿from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.api.dependencies import get_current_user
+from app.core.enums import ConversationStatus, MessageSenderType
+from app.db.session import get_db
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.user import User
+from app.schemas.conversation import (
+    ConversationCreate,
+    ConversationResponse,
+    ConversationDetail,
+    MessageCreate,
+    MessageResponse,
+)
+from app.services.conversation_service import process_customer_message
+from app.services.sla_service import apply_sla_to_conversation
+
+
+router = APIRouter(
+    prefix="/conversations",
+    tags=["Conversations"],
+)
+
+
+@router.post(
+    "",
+    response_model=ConversationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_conversation(
+    data: ConversationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conversation = Conversation(
+        customer_id=current_user.id,
+        subject=data.subject,
+        status=ConversationStatus.AI_HANDLING,
+        channel="website",
+    )
+
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    # Apply SLA configuration
+    apply_sla_to_conversation(db, conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    return conversation
+
+@router.get("", response_model=list[ConversationResponse])
+def list_conversations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return (
+        db.query(Conversation)
+        .filter(Conversation.customer_id == current_user.id)
+        .order_by(Conversation.created_at.desc())
+        .all()
+    )
+
+
+@router.get("/{conversation_id}", response_model=ConversationDetail)
+def get_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.customer_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    messages = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id, Message.is_internal == False)
+        .order_by(Message.created_at.asc())
+        .all()
+    )
+
+    return ConversationDetail(
+        id=conversation.id,
+        customer_id=conversation.customer_id,
+        assigned_agent_id=conversation.assigned_agent_id,
+        subject=conversation.subject,
+        status=conversation.status,
+        channel=conversation.channel,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        messages=[
+            MessageResponse(
+                id=m.id,
+                conversation_id=m.conversation_id,
+                sender_id=m.sender_id,
+                sender_type=m.sender_type,
+                message_type=m.message_type,
+                content=m.content,
+                is_internal=m.is_internal,
+                created_at=m.created_at,
+            )
+            for m in messages
+        ],
+    )
+
+
+@router.post(
+    "/{conversation_id}/messages",
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_message(
+    conversation_id: int,
+    data: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.customer_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    if conversation.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This conversation is no longer accepting messages",
+        )
+
+    await process_customer_message(db, conversation, current_user, data.content)
+
+    db.refresh(conversation)
+
+    customer_message = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.sender_id == current_user.id,
+            Message.sender_type == MessageSenderType.CUSTOMER,
+        )
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+
+    if not customer_message:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create message",
+        )
+
+    return MessageResponse(
+        id=customer_message.id,
+        conversation_id=customer_message.conversation_id,
+        sender_id=customer_message.sender_id,
+        sender_type=customer_message.sender_type,
+        message_type=customer_message.message_type,
+        content=customer_message.content,
+        is_internal=customer_message.is_internal,
+        created_at=customer_message.created_at,
+    )

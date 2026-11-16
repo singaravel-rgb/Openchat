@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenChat Widget Test Page</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+    h1 { color: #2563eb; }
+    .section { margin: 20px 0; padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; }
+    button { padding: 8px 16px; margin: 4px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    #status { margin-top: 10px; padding: 8px; background: #f8fafc; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>OpenChat Widget Test</h1>
+  <p>Test the embedded chat widget on this page.</p>
+
+  <div class="section">
+    <h3>Step 1: Open the chat widget</h3>
+    <p>Click the launcher (bottom-right) to start a conversation.</p>
+  </div>
+
+  <div class="section">
+    <h3>Step 2: Send a message</h3>
+    <p>Click "Start new conversation" in the widget, then type a message.</p>
+  </div>
+
+  <div class="section">
+    <h3>Step 3: Request human agent</h3>
+    <p>After the AI responds, click "Request human" to hand off to an agent.</p>
+  </div>
+
+  <div class="section">
+    <h3>Manual verification checklist</h3>
+    <input type="checkbox" id="widget-loaded"> Widget launcher visible<br>
+    <input type="checkbox" id="session-created"> Session created on open<br>
+    <input type="checkbox" id="conversation-started"> Conversation started<br>
+    <input type="checkbox" id="message-sent"> Customer message sent<br>
+    <input type="checkbox" id="ai-responded"> AI responded<br>
+    <input type="checkbox" id="human-requested"> Human handoff requested<br>
+    <input type="checkbox" id="agent-assigned"> Agent assigned (status = assigned)<br>
+    <input type="checkbox" id="agent-replied"> Agent replied<br>
+    <input type="checkbox" id="conversation-resolved"> Conversation resolved<br>
+    <input type="checkbox" id="admin-visible"> Admin can see conversation in dashboard
+  </div>
+
+  <script src="/api/v1/widget/embed.js" async></script>
+</body>
+</html>

@@ -24,3 +24,60 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Drag and drop styles */
+.dragging {
+  opacity: 0.5;
+}
+
+tr.dragging td {
+  background-color: rgb(239 246 255) !important;
+}
+
+.dark tr.dragging td {
+  background-color: rgb(30 58 138 / 0.2) !important;
+}
+
+tbody tr[draggable="true"] {
+  cursor: grab;
+}
+
+tbody tr[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Drag handle styles */
+.drag-handle {
+  cursor: grab;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(100 116 139);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgb(100 116 139);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184);
+}

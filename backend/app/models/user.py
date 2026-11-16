@@ -1,9 +1,13 @@
 from datetime import datetime
+from typing import List
 
 from sqlalchemy import Boolean, DateTime, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.agent_profile import AgentProfile
+from app.models.notification import Notification
+from app.models.team import user_team_membership
 
 
 class User(Base):
@@ -21,5 +25,26 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     password_hash: Mapped[str] = mapped_column(
-    String(255), nullable=False
-)
+        String(255), nullable=False
+    )
+
+    agent_profile = relationship(
+        AgentProfile,
+        foreign_keys=AgentProfile.user_id,
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    notifications: Mapped[List[Notification]] = relationship(
+        Notification,
+        foreign_keys=Notification.user_id,
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    teams: Mapped[list["Team"]] = relationship(
+        secondary=user_team_membership, back_populates="members"
+    )

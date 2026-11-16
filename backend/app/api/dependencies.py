@@ -46,13 +46,13 @@ def get_current_user(
     return user
 
 
-def require_roles(*allowed_roles: UserRole):
+def require_roles(*allowed_roles: str | UserRole):
 
     def role_checker(
         current_user: User = Depends(get_current_user),
     ) -> User:
 
-        allowed_values = {role.value for role in allowed_roles}
+        allowed_values = {role.value if isinstance(role, UserRole) else role for role in allowed_roles}
 
         if current_user.role not in allowed_values:
             raise HTTPException(
