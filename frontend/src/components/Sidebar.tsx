@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import type { User } from '@/lib/types';
@@ -27,7 +27,7 @@ interface NavItemProps {
   pathname: string;
   collapsed: boolean;
   expandedGroups: Set<string>;
-  onToggleGroup: (label: string) => void;
+  onToggleGroup: (label: string, defaultHref?: string) => void;
   level?: number;
 }
 
@@ -39,29 +39,49 @@ function NavItem({
   onToggleGroup,
   level = 0,
 }: NavItemProps) {
-  const isActive =
+  const router = useRouter();
+  const isExactMatch = Boolean(item.href) && pathname === item.href;
+  const isPrefixMatch =
     Boolean(item.href) &&
-    (pathname === item.href || (item.href !== '/' && pathname.startsWith(`${item.href}/`)));
+    item.href !== '/' &&
+    item.href !== '/admin' &&
+    item.href !== '/agent' &&
+    pathname.startsWith(`${item.href}/`);
+  const isActive = isExactMatch || isPrefixMatch;
   const hasChildren = Boolean(item.items && item.items.length > 0);
   const isOpen = expandedGroups.has(item.label);
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (hasChildren) {
+      e.preventDefault();
+      // If group is currently closed, expand it and optionally navigate to its primary child
+      if (!isOpen && item.items?.[0]?.href) {
+        onToggleGroup(item.label, item.items[0].href);
+      } else {
+        onToggleGroup(item.label);
+      }
+    }
+  };
+
+  const handleChevronClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onToggleGroup(item.label);
+  };
 
   return (
     <div className="w-full">
       <Link
-        href={item.href || '#'}
-        onClick={(event) => {
-          if (hasChildren) {
-            event.preventDefault();
-            onToggleGroup(item.label);
-          }
-        }}
+        href={item.href || item.items?.[0]?.href || '#'}
+        onClick={handleClick}
         title={collapsed ? item.label : undefined}
         aria-current={isActive ? 'page' : undefined}
+        aria-expanded={hasChildren ? isOpen : undefined}
         className={[
-          'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
+          'group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors cursor-pointer select-none',
           level > 0 ? 'pl-8' : '',
           isActive
-            ? 'bg-blue-600/20 text-blue-300'
+            ? 'bg-blue-600/20 text-blue-300 font-semibold'
             : 'text-slate-400 hover:bg-slate-800/60 hover:text-white',
           collapsed ? 'justify-center' : '',
         ]
@@ -75,9 +95,26 @@ function NavItem({
           <>
             <span className="flex-1 truncate text-left font-medium">{item.label}</span>
             {typeof item.badge === 'number' && item.badge > 0 && (
-              <span className="ml-auto rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
+              <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
                 {item.badge > 99 ? '99+' : item.badge}
               </span>
+            )}
+            {hasChildren && (
+              <button
+                type="button"
+                onClick={handleChevronClick}
+                aria-label={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
+                className="p-1 -mr-1 rounded hover:bg-slate-700/60 text-slate-400 hover:text-white transition-colors"
+              >
+                <svg
+                  className={`h-4 w-4 transition-transform duration-200 ${isOpen ? 'rotate-90 text-white' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
             )}
           </>
         )}
@@ -109,12 +146,21 @@ function NavItem({
  */
 export function Sidebar({ user, navigation, collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
-  const expandedGroups = useMemo(() => {
-    const groups = new Set<string>();
+  const router = useRouter();
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-    const findParents = (items: NavGroup[], target: string): string[] => {
+  // Auto-expand groups matching current path
+  useEffect(() => {
+    function findParents(items: NavGroup[], target: string): string[] {
       for (const item of items) {
-        if (item.href && (target === item.href || target.startsWith(`${item.href}/`))) {
+        if (
+          item.href &&
+          (target === item.href ||
+            (item.href !== '/' &&
+              item.href !== '/admin' &&
+              item.href !== '/agent' &&
+              target.startsWith(`${item.href}/`)))
+        ) {
           return [item.label];
         }
         if (item.items) {
@@ -123,11 +169,33 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: SidebarProps)
         }
       }
       return [];
-    };
+    }
 
-    findParents(navigation, pathname).forEach((label) => groups.add(label));
-    return groups;
+    const parents = findParents(navigation, pathname);
+    if (parents.length > 0) {
+      setExpandedGroups((prev) => {
+        const next = new Set(prev);
+        parents.forEach((label) => next.add(label));
+        return next;
+      });
+    }
   }, [navigation, pathname]);
+
+  const handleToggleGroup = (label: string, defaultHref?: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) {
+        next.delete(label);
+      } else {
+        next.add(label);
+      }
+      return next;
+    });
+
+    if (defaultHref && pathname !== defaultHref) {
+      router.push(defaultHref);
+    }
+  };
 
   return (
     <aside
@@ -177,15 +245,7 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: SidebarProps)
             pathname={pathname}
             collapsed={collapsed}
             expandedGroups={expandedGroups}
-            onToggleGroup={(label) => {
-              // Group toggling is local UI state; navigation itself is link based.
-              const target = document.activeElement;
-              if (target instanceof HTMLElement) target.blur();
-              const list = navigation.find((entry) => entry.label === label);
-              if (list?.href) {
-                window.location.href = list.href;
-              }
-            }}
+            onToggleGroup={handleToggleGroup}
           />
         ))}
       </nav>

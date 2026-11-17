@@ -238,16 +238,20 @@ export default function AdminReportsPage() {
             <Card>
               <CardContent className="p-6">
                 <div className="text-sm text-slate-500 dark:text-slate-400">Total Conversations</div>
-                <div className="text-3xl font-bold text-slate-900 dark:text-white">{conversationMetrics.total}</div>
+                <div className="text-3xl font-bold text-slate-900 dark:text-white">
+                  {(conversationMetrics as any).total ?? conversationMetrics.total_conversations ?? 0}
+                </div>
                 <div className="text-sm text-green-600 dark:text-green-400 mt-1">
-                  +{conversationMetrics.today.created} today
+                  +{(conversationMetrics as any).today?.created ?? 0} today
                 </div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-6">
                 <div className="text-sm text-slate-500 dark:text-slate-400">Resolved Today</div>
-                <div className="text-3xl font-bold text-slate-900 dark:text-white">{conversationMetrics.today.resolved}</div>
+                <div className="text-3xl font-bold text-slate-900 dark:text-white">
+                  {(conversationMetrics as any).today?.resolved ?? conversationMetrics.resolved ?? 0}
+                </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">Resolved this period</div>
               </CardContent>
             </Card>
@@ -255,8 +259,8 @@ export default function AdminReportsPage() {
               <CardContent className="p-6">
                 <div className="text-sm text-slate-500 dark:text-slate-400">Avg First Response</div>
                 <div className="text-3xl font-bold text-slate-900 dark:text-white">
-                  {conversationMetrics.avg_first_response_minutes
-                    ? `${conversationMetrics.avg_first_response_minutes}m`
+                  {(conversationMetrics as any).avg_first_response_minutes ?? (conversationMetrics as any).avg_response_time_minutes
+                    ? `${((conversationMetrics as any).avg_first_response_minutes ?? (conversationMetrics as any).avg_response_time_minutes).toFixed(1)}m`
                     : 'N/A'}
                 </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">Minutes</div>
@@ -266,8 +270,8 @@ export default function AdminReportsPage() {
               <CardContent className="p-6">
                 <div className="text-sm text-slate-500 dark:text-slate-400">Avg Resolution Time</div>
                 <div className="text-3xl font-bold text-slate-900 dark:text-white">
-                  {conversationMetrics.avg_resolution_hours
-                    ? `${conversationMetrics.avg_resolution_hours.toFixed(1)}h`
+                  {(conversationMetrics as any).avg_resolution_hours ?? (conversationMetrics as any).avg_resolution_time_minutes
+                    ? `${(((conversationMetrics as any).avg_resolution_hours ?? ((conversationMetrics as any).avg_resolution_time_minutes / 60))).toFixed(1)}h`
                     : 'N/A'}
                 </div>
                 <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">Hours</div>
@@ -283,7 +287,13 @@ export default function AdminReportsPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {Object.entries(conversationMetrics.by_status).map(([status, count]) => (
+                  {Object.entries((conversationMetrics as any).by_status || {
+                    'ai_handling': conversationMetrics.ai_handling ?? 0,
+                    'pending': conversationMetrics.pending ?? 0,
+                    'assigned': conversationMetrics.assigned ?? 0,
+                    'resolved': conversationMetrics.resolved ?? 0,
+                    'closed': conversationMetrics.closed ?? 0,
+                  }).map(([status, count]) => (
                     <div key={status} className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <Badge variant={
@@ -294,7 +304,7 @@ export default function AdminReportsPage() {
                           {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
                         </Badge>
                       </div>
-                      <div className="font-medium text-slate-900 dark:text-white">{count}</div>
+                      <div className="font-medium text-slate-900 dark:text-white">{count as number}</div>
                     </div>
                   ))}
                 </div>
@@ -307,12 +317,14 @@ export default function AdminReportsPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {Object.entries(conversationMetrics.by_channel).map(([channel, count]) => (
+                  {Object.entries((conversationMetrics as any).by_channel || {
+                    'website': (conversationMetrics as any).total ?? conversationMetrics.total_conversations ?? 0,
+                  }).map(([channel, count]) => (
                     <div key={channel} className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <Badge variant="default">{channel}</Badge>
                       </div>
-                      <div className="font-medium text-slate-900 dark:text-white">{count}</div>
+                      <div className="font-medium text-slate-900 dark:text-white">{count as number}</div>
                     </div>
                   ))}
                 </div>

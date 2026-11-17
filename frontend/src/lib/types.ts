@@ -250,13 +250,23 @@ export interface NotificationList {
 }
 
 export interface ConversationMetrics {
-  total: number;
-  by_status: Record<string, number>;
-  by_channel: Record<string, number>;
-  avg_first_response_minutes: number | null;
-  avg_resolution_hours: number | null;
-  csat_score: number | null;
-  today: {
+  total?: number;
+  total_conversations?: number;
+  by_status?: Record<string, number>;
+  by_channel?: Record<string, number>;
+  avg_first_response_minutes?: number | null;
+  avg_response_time_minutes?: number | null;
+  avg_resolution_hours?: number | null;
+  avg_resolution_time_minutes?: number | null;
+  csat_score?: number | null;
+  sla_response_met_pct?: number | null;
+  sla_resolution_met_pct?: number | null;
+  ai_handling?: number;
+  pending?: number;
+  assigned?: number;
+  resolved?: number;
+  closed?: number;
+  today?: {
     created: number;
     resolved: number;
   };
