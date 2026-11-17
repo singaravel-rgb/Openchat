@@ -24,7 +24,7 @@ from app.schemas.conversation import (
     MessageCreate,
     MessageResponse,
 )
-from app.schemas.auth import UserCreate
+from app.schemas.auth import UserCreate, AdminAgentCreate
 from app.services.conversation_service import (
     build_conversation_list_item,
     list_conversations_query,
@@ -134,6 +134,49 @@ def list_agents(
             "capacity_remaining": max(0, (profile.max_conversations if profile else 5) - active_count),
         })
     return result
+
+
+@router.post("/agents", status_code=201)
+def create_agent(
+    payload: AdminAgentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    existing = db.query(User).filter(User.email == payload.email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="A user with this email already exists")
+
+    new_user = User(
+        email=payload.email,
+        full_name=payload.full_name,
+        password_hash=hash_password(payload.password),
+        role="agent",
+        is_active=True,
+    )
+    db.add(new_user)
+    db.flush()
+
+    new_profile = AgentProfile(
+        user_id=new_user.id,
+        is_approved=True,
+        is_available=payload.is_available,
+        max_conversations=payload.max_conversations,
+    )
+    db.add(new_profile)
+    db.commit()
+    db.refresh(new_user)
+
+    return {
+        "id": new_user.id,
+        "email": new_user.email,
+        "full_name": new_user.full_name,
+        "is_active": new_user.is_active,
+        "is_approved": True,
+        "is_available": new_profile.is_available,
+        "max_conversations": new_profile.max_conversations,
+        "active_conversations": 0,
+        "capacity_remaining": new_profile.max_conversations,
+    }
 
 
 @router.patch("/agents/{agent_id}/availability")

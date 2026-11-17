@@ -126,3 +126,4 @@ async def test_admin_navigation():
         print('\nALL ADMIN SIDEBAR NAVIGATION CHECKS PASSED 100%!')
 
 asyncio.run(test_admin_navigation())
+

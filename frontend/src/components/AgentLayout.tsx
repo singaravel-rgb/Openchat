@@ -121,6 +121,7 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
     if (path === '/admin') return 'Dashboard';
     if (path === '/admin/reports') return 'Reports';
     if (path === '/admin/sla') return 'SLA Configurations';
+    if (path === '/admin/audit-logs') return 'Audit Logs';
     if (path === '/admin/agents') return 'Agents';
     if (path === '/admin/teams') return 'Teams';
     if (path === '/admin/conversations') return 'All Conversations';

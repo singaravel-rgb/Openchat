@@ -6,7 +6,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className = '', label, error, ...props }, ref) => {
+  ({ className = '', label, error, value, ...props }, ref) => {
     return (
       <div className="w-full">
         {label && (
@@ -16,6 +16,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         )}
         <input
           ref={ref}
+          value={value === null ? '' : value}
           className={`
             w-full px-3 py-2 text-sm border rounded-lg bg-white
             placeholder:text-slate-400
@@ -41,7 +42,7 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className = '', label, error, ...props }, ref) => {
+  ({ className = '', label, error, value, ...props }, ref) => {
     return (
       <div className="w-full">
         {label && (
@@ -51,6 +52,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         )}
         <textarea
           ref={ref}
+          value={value === null ? '' : value}
           className={`
             w-full px-3 py-2 text-sm border rounded-lg bg-white
             placeholder:text-slate-400 resize-y min-h-[80px]

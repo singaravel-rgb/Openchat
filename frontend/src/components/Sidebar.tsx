@@ -446,6 +446,7 @@ export function createNavigation(user: User): NavGroup[] {
       items: [
         { label: 'Reports', href: '/admin/reports', icon: NavIcons.reports },
         { label: 'SLA', href: '/admin/sla', icon: NavIcons.sla },
+        { label: 'Audit Logs', href: '/admin/audit-logs', icon: NavIcons.reports },
       ],
     });
     navigation.push({

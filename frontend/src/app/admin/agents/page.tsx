@@ -15,6 +15,12 @@ export default function AdminAgentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingAgent, setEditingAgent] = useState<AdminAgent | null>(null);
   const [maxConversations, setMaxConversations] = useState(5);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newAgentEmail, setNewAgentEmail] = useState('');
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentPassword, setNewAgentPassword] = useState('');
+  const [newAgentMax, setNewAgentMax] = useState(5);
+  const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -60,6 +66,32 @@ export default function AdminAgentsPage() {
     }
   };
 
+  const handleCreateAgent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAgentEmail || !newAgentName || !newAgentPassword) return;
+    setIsCreating(true);
+    setError(null);
+    try {
+      const created = await adminApi.createAgent({
+        email: newAgentEmail,
+        full_name: newAgentName,
+        password: newAgentPassword,
+        max_conversations: newAgentMax,
+        is_available: true,
+      });
+      setAgents((prev) => [created, ...prev]);
+      setShowCreateModal(false);
+      setNewAgentEmail('');
+      setNewAgentName('');
+      setNewAgentPassword('');
+      setNewAgentMax(5);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create agent');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -75,6 +107,7 @@ export default function AdminAgentsPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Agents</h1>
           <p className="text-slate-500 dark:text-slate-400">Manage support agents and their availability</p>
         </div>
+        <Button onClick={() => setShowCreateModal(true)}>+ Add Agent</Button>
       </div>
 
       {error && (
@@ -198,6 +231,65 @@ export default function AdminAgentsPage() {
                 </Button>
                 <Button onClick={handleSaveMaxConversations}>Save</Button>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Create Agent Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <Card className="w-full max-w-md mx-4">
+            <CardHeader>
+              <h3 className="text-lg font-semibold">Add New Agent</h3>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreateAgent} className="space-y-4">
+                <Input
+                  label="Full Name"
+                  required
+                  placeholder="e.g. Jane Doe"
+                  value={newAgentName}
+                  onChange={(e) => setNewAgentName(e.target.value)}
+                />
+                <Input
+                  label="Email Address"
+                  type="email"
+                  required
+                  placeholder="jane@example.com"
+                  value={newAgentEmail}
+                  onChange={(e) => setNewAgentEmail(e.target.value)}
+                />
+                <Input
+                  label="Password"
+                  type="password"
+                  required
+                  placeholder="Minimum 6 characters"
+                  value={newAgentPassword}
+                  onChange={(e) => setNewAgentPassword(e.target.value)}
+                />
+                <Input
+                  label="Max Concurrent Conversations"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={newAgentMax}
+                  onChange={(e) => setNewAgentMax(parseInt(e.target.value) || 5)}
+                />
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowCreateModal(false)}
+                    disabled={isCreating}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={isCreating}>
+                    {isCreating ? 'Creating...' : 'Create Agent'}
+                  </Button>
+                </div>
+              </form>
             </CardContent>
           </Card>
         </div>

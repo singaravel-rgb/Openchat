@@ -7,6 +7,14 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class AdminAgentCreate(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=2, max_length=255)
+    password: str = Field(min_length=6, max_length=128)
+    max_conversations: int = Field(default=5, ge=1, le=50)
+    is_available: bool = False
+
+
 class AgentProfileSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

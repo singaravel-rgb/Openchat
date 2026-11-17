@@ -43,6 +43,10 @@ def create_sla_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    existing = db.query(SLAConfig).filter(SLAConfig.name == data.name).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="An SLA config with this name already exists")
+
     # If this is set as default, unset other defaults
     if data.is_default:
         db.query(SLAConfig).filter(SLAConfig.is_default == True).update({"is_default": False})

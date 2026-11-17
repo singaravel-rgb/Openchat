@@ -1,0 +1,239 @@
+[
+  {
+    "path": "/admin",
+    "name": "Dashboard",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 20,
+    "inputs_count": 1,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings DA  Demo Admin  Admin  Logout Dashboard 9+ DA Dashboard  Overview of your support operations  Total Conversations  163  Pending  0  Assig"
+  },
+  {
+    "path": "/admin/conversations",
+    "name": "Conversations",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 73,
+    "inputs_count": 5,
+    "content_preview": "OpenChat Dashboard Workspace All Conversations Agents Teams Knowledge Base Analytics Settings DA  Demo Admin  Admin  Logout All Conversations 9+ DA 50 Conversations All Status All Statuses AI Handling"
+  },
+  {
+    "path": "/admin/agents",
+    "name": "Agents",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 28,
+    "inputs_count": 1,
+    "content_preview": "OpenChat Dashboard Workspace All Conversations Agents Teams Knowledge Base Analytics Settings DA  Demo Admin  Admin  Logout Agents 9+ DA Agents  Manage support agents and their availability  Agent Lis"
+  },
+  {
+    "path": "/admin/teams",
+    "name": "Teams",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 27,
+    "inputs_count": 1,
+    "content_preview": "OpenChat Dashboard Workspace All Conversations Agents Teams Knowledge Base Analytics Settings DA  Demo Admin  Admin  Logout Teams 9+ DA Teams & Departments  Manage teams, departments, and member assig"
+  },
+  {
+    "path": "/admin/categories",
+    "name": "Categories",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 39,
+    "inputs_count": 1,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Categories Articles FAQs Analytics Settings DA  Demo Admin  Admin  Logout Categories 9+ DA Categories  Manage knowledge base categories  New Category \tName\t"
+  },
+  {
+    "path": "/admin/articles",
+    "name": "Articles",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 36,
+    "inputs_count": 3,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Categories Articles FAQs Analytics Settings DA  Demo Admin  Admin  Logout Articles 9+ DA Articles  Manage knowledge base articles  New Article All Statuses "
+  },
+  {
+    "path": "/admin/faqs",
+    "name": "FAQs",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 40,
+    "inputs_count": 3,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Categories Articles FAQs Analytics Settings DA  Demo Admin  Admin  Logout FAQs 9+ DA FAQs  Manage frequently asked questions  New FAQ All Published Only Unp"
+  },
+  {
+    "path": "/admin/reports",
+    "name": "Reports",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [
+      "GET http://localhost:8000/api/v1/admin/reports/time-series?start_date=2026-10-18&end_date=2026-11-17 -> 422"
+    ],
+    "console_errors": [],
+    "buttons_count": 27,
+    "inputs_count": 5,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Reports SLA Settings DA  Demo Admin  Admin  Logout Reports 9+ DA Reports & Analytics  Track performance and gain insights  Export CSV Export JSON "
+  },
+  {
+    "path": "/admin/sla",
+    "name": "SLA",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 26,
+    "inputs_count": 1,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Reports SLA Settings DA  Demo Admin  Admin  Logout SLA Configurations 9+ DA SLA Configurations  Manage Service Level Agreement settings  New SLA C"
+  },
+  {
+    "path": "/admin/settings",
+    "name": "General Settings",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 21,
+    "inputs_count": 7,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/settings/ai",
+    "name": "AI Configuration",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 22,
+    "inputs_count": 17,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/settings/widget",
+    "name": "Widget Configuration",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 24,
+    "inputs_count": 18,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/settings/rules",
+    "name": "Assignment Rules",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 21,
+    "inputs_count": 4,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/settings/notifications",
+    "name": "Notifications",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 25,
+    "inputs_count": 8,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/canned-responses",
+    "name": "Canned Responses",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 27,
+    "inputs_count": 3,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/custom-fields",
+    "name": "Custom Fields",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 23,
+    "inputs_count": 2,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/business-hours",
+    "name": "Business Hours",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [
+      "GET http://localhost:8000/api/v1/business-hours/holidays? -> 422",
+      "GET http://localhost:8000/api/v1/business-hours/holidays? -> 422",
+      "GET http://localhost:8000/api/v1/business-hours/holidays? -> 422"
+    ],
+    "console_errors": [],
+    "buttons_count": 23,
+    "inputs_count": 2,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/webhooks",
+    "name": "Webhooks",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 27,
+    "inputs_count": 2,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings General AI Configuration Widget Assignment Rules Notifications Canned Responses Custom Fields Business Hours Webhooks DA  Demo Admin  Adm"
+  },
+  {
+    "path": "/admin/automation-rules",
+    "name": "Automation Rules",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 21,
+    "inputs_count": 3,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings DA  Demo Admin  Admin  Logout OpenChat 9+ DA Automation Rules  Create rules to automate workflows based on events  New Rule All Status Ac"
+  },
+  {
+    "path": "/admin/bot-flows",
+    "name": "Bot Flows",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 22,
+    "inputs_count": 2,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings DA  Demo Admin  Admin  Logout OpenChat 9+ DA Bot Flows  Create and manage automated conversation flows  New Flow All Status Draft Publish"
+  },
+  {
+    "path": "/admin/campaigns",
+    "name": "Campaigns",
+    "status_code": 200,
+    "has_error_text": false,
+    "failed_api_calls": [],
+    "console_errors": [],
+    "buttons_count": 21,
+    "inputs_count": 2,
+    "content_preview": "OpenChat Dashboard Workspace Knowledge Base Analytics Settings DA  Demo Admin  Admin  Logout OpenChat 9+ DA Campaigns  Create and manage outbound messaging campaigns  New Campaign All Status Draft Sch"
+  }
+]

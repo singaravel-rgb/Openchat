@@ -1,4 +1,4 @@
-import type { Token, User, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch } from './types';
+import type { Token, User, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, AuditLogItem, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -235,8 +235,26 @@ export const customerApi = {
 
 export const adminApi = {
   getStats: () => fetchApi<AdminStats>('/admin/stats'),
+  getAuditLogs: (params?: { limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.offset) searchParams.append('offset', params.offset.toString());
+    return fetchApi<AuditLogItem[]>(`/admin/audit-logs?${searchParams}`);
+  },
 
   listAgents: () => fetchApi<AdminAgent[]>('/admin/agents'),
+
+  createAgent: (data: {
+    email: string;
+    full_name: string;
+    password: string;
+    max_conversations?: number;
+    is_available?: boolean;
+  }) =>
+    fetchApi<AdminAgent>('/admin/agents', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   setAgentAvailability: (agentId: number, isAvailable: boolean) =>
     fetchApi<{ message: string }>(`/admin/agents/${agentId}/availability?is_available=${isAvailable}`, {

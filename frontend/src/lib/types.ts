@@ -249,6 +249,18 @@ export interface NotificationList {
   unread_count: number;
 }
 
+export interface AuditLogItem {
+  id: number;
+  user_id: number | null;
+  action: string;
+  resource_type: string | null;
+  resource_id: number | null;
+  details: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
 export interface ConversationMetrics {
   total?: number;
   total_conversations?: number;

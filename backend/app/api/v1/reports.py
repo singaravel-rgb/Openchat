@@ -53,7 +53,7 @@ def get_agents_performance(
 
 @router.get("/time-series", response_model=TimeSeriesData)
 def get_time_series_data(
-    metric: str = Query(..., description="Metric: conversations_created, conversations_resolved, messages"),
+    metric: str = Query("conversations_created", description="Metric: conversations_created, conversations_resolved, messages"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     interval: str = Query("day", description="Interval: day, hour"),

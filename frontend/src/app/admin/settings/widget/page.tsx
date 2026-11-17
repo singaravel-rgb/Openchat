@@ -62,7 +62,16 @@ export default function WidgetConfigurationPage() {
     (async () => {
       try {
         const [cfg, sn] = await Promise.all([adminApi.getWidgetConfig(), adminApi.getWidgetEmbedSnippet()]);
-        const c = { ...defaults, ...cfg, logo_url: cfg.logo_url || '', allowed_domains: cfg.allowed_domains || [] } as WidgetConfig;
+        const c = {
+          ...defaults,
+          ...cfg,
+          logo_url: cfg.logo_url || '',
+          allowed_domains: cfg.allowed_domains || [],
+          host_identity_jwks_url: cfg.host_identity_jwks_url || '',
+          host_identity_issuer: cfg.host_identity_issuer || '',
+          host_identity_audience: cfg.host_identity_audience || 'openchat-widget',
+          host_identity_public_key: cfg.host_identity_public_key || '',
+        } as WidgetConfig;
         setConfig(c);
         setDomainsText((c.allowed_domains || []).join('\n'));
         setSnippet(sn.snippet);
@@ -81,7 +90,16 @@ export default function WidgetConfigurationPage() {
       const allowed_domains = domainsText.split(/\n|,/).map(d => d.trim()).filter(Boolean);
       const payload = { ...config, logo_url: config.logo_url || null, allowed_domains };
       const saved = await adminApi.updateWidgetConfig(payload);
-      setConfig({ ...defaults, ...saved, logo_url: (saved as any).logo_url || '', allowed_domains: (saved as any).allowed_domains || [] });
+      setConfig({
+        ...defaults,
+        ...saved,
+        logo_url: (saved as any).logo_url || '',
+        allowed_domains: (saved as any).allowed_domains || [],
+        host_identity_jwks_url: (saved as any).host_identity_jwks_url || '',
+        host_identity_issuer: (saved as any).host_identity_issuer || '',
+        host_identity_audience: (saved as any).host_identity_audience || 'openchat-widget',
+        host_identity_public_key: (saved as any).host_identity_public_key || '',
+      });
       setDomainsText(((saved as any).allowed_domains || []).join('\n'));
       const sn = await adminApi.getWidgetEmbedSnippet();
       setSnippet(sn.snippet); setScriptUrl(sn.script_url);

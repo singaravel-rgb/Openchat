@@ -36,3 +36,4 @@ async def test():
         await browser.close()
 
 asyncio.run(test())
+

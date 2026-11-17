@@ -56,3 +56,4 @@ async def check_routes():
         await browser.close()
 
 asyncio.run(check_routes())
+

@@ -62,55 +62,6 @@ def list_business_hours(
     return query.all()
 
 
-@router.get("/{bh_id}", response_model=BusinessHoursResponse)
-def get_business_hours(
-    bh_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
-):
-    """Get business hours for a specific day."""
-    bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()
-    if not bh:
-        raise HTTPException(status_code=404, detail="Business hours not found")
-    return bh
-
-
-@router.patch("/{bh_id}", response_model=BusinessHoursResponse)
-def update_business_hours(
-    bh_id: int,
-    data: BusinessHoursUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
-):
-    """Update business hours."""
-    bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()
-    if not bh:
-        raise HTTPException(status_code=404, detail="Business hours not found")
-
-    for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(bh, field, value)
-
-    db.commit()
-    db.refresh(bh)
-    return bh
-
-
-@router.delete("/{bh_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_business_hours(
-    bh_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
-):
-    """Delete business hours."""
-    bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()
-    if not bh:
-        raise HTTPException(status_code=404, detail="Business hours not found")
-
-    db.delete(bh)
-    db.commit()
-    return None
-
-
 # ===== Holiday Endpoints =====
 
 @router.post("/holidays", response_model=HolidayResponse, status_code=status.HTTP_201_CREATED)
@@ -234,3 +185,54 @@ def is_business_open(
         return {"is_open": True, "reason": "Within business hours"}
     else:
         return {"is_open": False, "reason": "Outside business hours"}
+
+
+# ===== Day-specific Business Hours Endpoints =====
+
+@router.get("/{bh_id}", response_model=BusinessHoursResponse)
+def get_business_hours(
+    bh_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_agent),
+):
+    """Get business hours for a specific day."""
+    bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()
+    if not bh:
+        raise HTTPException(status_code=404, detail="Business hours not found")
+    return bh
+
+
+@router.patch("/{bh_id}", response_model=BusinessHoursResponse)
+def update_business_hours(
+    bh_id: int,
+    data: BusinessHoursUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_agent),
+):
+    """Update business hours."""
+    bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()
+    if not bh:
+        raise HTTPException(status_code=404, detail="Business hours not found")
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(bh, field, value)
+
+    db.commit()
+    db.refresh(bh)
+    return bh
+
+
+@router.delete("/{bh_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_business_hours(
+    bh_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_agent),
+):
+    """Delete business hours."""
+    bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()
+    if not bh:
+        raise HTTPException(status_code=404, detail="Business hours not found")
+
+    db.delete(bh)
+    db.commit()
+    return None
