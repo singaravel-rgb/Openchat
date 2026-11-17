@@ -454,6 +454,7 @@ export function createNavigation(user: User): NavGroup[] {
       icon: NavIcons.settings,
       items: [
         { label: 'General', href: '/admin/settings', icon: NavIcons.settings },
+        { label: 'AI Flow & Rules', href: '/admin/settings/ai-flow', icon: NavIcons.rules },
         { label: 'AI Configuration', href: '/admin/settings/ai', icon: NavIcons.settings },
         { label: 'Widget', href: '/admin/settings/widget', icon: NavIcons.settings },
         { label: 'Assignment Rules', href: '/admin/settings/rules', icon: NavIcons.rules },

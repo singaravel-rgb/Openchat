@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useParams, useRouter, usePathname } from 'next/navigation';
+import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Badge } from '@/components/Badge';
 import { Avatar } from '@/components/Avatar';
 import { format, formatDistanceToNow, isValid, parseISO } from 'date-fns';
-import type { ConversationListItem, Message, CannedResponse, Attachment, ConversationCustomFieldValue, ConversationTask } from '@/lib/types';
+import type { ConversationListItem, Message, CannedResponse, Attachment, ConversationCustomFieldValue, GlobalNoteResponse } from '@/lib/types';
 import { conversationApi,   agentApi,
   attachmentApi, adminApi, cannedResponseApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -17,10 +17,12 @@ const QUEUE_OPTIONS = [
   { value: 'pending', label: 'Pending' },
   { value: 'assigned', label: 'Assigned to Me' },
   { value: 'unassigned', label: 'Unassigned' },
+  { value: 'waiting', label: 'Waiting on Customer' },
+  { value: 'on_hold', label: 'On Hold' },
   { value: 'resolved', label: 'Resolved' },
 ] as const;
 
-type QueueValue = 'inbox' | 'pending' | 'assigned' | 'unassigned' | 'resolved';
+type QueueValue = 'inbox' | 'pending' | 'assigned' | 'unassigned' | 'waiting' | 'on_hold' | 'resolved';
 
 interface ThreePanelWorkspaceProps {
   userRole: 'customer' | 'agent' | 'admin';
@@ -55,8 +57,10 @@ const senderInfo = (message: Message) => {
 const getStatusBadgeVariant = (status: string) => {
   switch (status) {
     case 'resolved': case 'closed': return 'success';
+    case 'open': case 'assigned': return 'primary';
     case 'pending': return 'warning';
-    case 'assigned': return 'primary';
+    case 'waiting_on_customer': return 'ai';
+    case 'on_hold': return 'system';
     case 'ai_handling': return 'info';
     default: return 'default';
   }
@@ -114,11 +118,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const router = useRouter();
   const pathname = usePathname();
   const params = useParams();
+  const searchParams = useSearchParams();
 
   // Layout state
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [rightDetailsSection, setRightDetailsSection] = useState<string | null>(null);
-  const [queueFilter, setQueueFilter] = useState<'all' | 'unassigned' | 'pending' | 'ai'>('all');
+  const [queueFilter, setQueueFilter] = useState<'all' | 'unassigned' | 'pending' | 'waiting' | 'on_hold' | 'ai'>('all');
   const [showEmojiMenu, setShowEmojiMenu] = useState(false);
   const [showCannedMenu, setShowCannedMenu] = useState(false);
   const [showKnowledgeMenu, setShowKnowledgeMenu] = useState(false);
@@ -134,11 +139,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [searchTerm, setSearchTerm] = useState('');
   // Admin advanced filters
   const [adminFilters, setAdminFilters] = useState<AdminFilters>({
-    status: '',
+    status: searchParams?.get('status') || '',
     agent_id: '',
     customer_id: '',
     q: '',
   });
+
+  useEffect(() => {
+    const statusParam = searchParams?.get('status');
+    if (statusParam) {
+      setAdminFilters(prev => ({ ...prev, status: statusParam }));
+    }
+  }, [searchParams]);
   const [messageInput, setMessageInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isInternal, setIsInternal] = useState(false);
@@ -169,16 +181,21 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [showContactDetails, setShowContactDetails] = useState(false);
   const [showPropertiesDetails, setShowPropertiesDetails] = useState(false);
   const [showTimeLogs, setShowTimeLogs] = useState(false);
-  const [showTodo, setShowTodo] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
-  const [tasks, setTasks] = useState<ConversationTask[]>([]);
   const [assignmentHistory, setAssignmentHistory] = useState<Array<Record<string, unknown>>>([]);
-  const [showAllTasks, setShowAllTasks] = useState(false);
-  const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newTaskDue, setNewTaskDue] = useState('');
-  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
-  const [editingTaskTitle, setEditingTaskTitle] = useState('');
-  const [taskSaving, setTaskSaving] = useState(false);
+  const [showGlobalNote, setShowGlobalNote] = useState(true);
+  const [globalNote, setGlobalNote] = useState('');
+  const [globalNoteDraft, setGlobalNoteDraft] = useState('');
+  const [globalNoteUpdatedAt, setGlobalNoteUpdatedAt] = useState<string | null>(null);
+  const [globalNoteUpdatedByName, setGlobalNoteUpdatedByName] = useState<string | null>(null);
+  const [isEditingGlobalNote, setIsEditingGlobalNote] = useState(false);
+  const [savingGlobalNote, setSavingGlobalNote] = useState(false);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+
+  // Mention autocomplete state
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionTarget, setMentionTarget] = useState<'global_note' | 'message' | null>(null);
+  const [mentionCursorIndex, setMentionCursorIndex] = useState<number>(0);
   const [isUploading, setIsUploading] = useState(false);
   const [showContactEdit, setShowContactEdit] = useState(false);
   const [contactName, setContactName] = useState('');
@@ -301,6 +318,11 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setAttachments(detail.attachments || []);
       setCustomFields(detail.custom_fields || []);
       setAssignmentHistory(detail.assignment_history || []);
+      setGlobalNote(detail.global_note || '');
+      setGlobalNoteDraft(detail.global_note || '');
+      setGlobalNoteUpdatedAt(detail.global_note_updated_at || null);
+      setGlobalNoteUpdatedByName(detail.global_note_updated_by_name || null);
+      setIsEditingGlobalNote(false);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load conversation';
       setError(errorMessage);
@@ -316,22 +338,22 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setShowContactDetails(true);
       setShowPropertiesDetails(false);
       setShowTimeLogs(false);
-      setShowTodo(false);
+      setShowGlobalNote(false);
       setShowTimeline(false);
     } else if (rightDetailsSection === 'properties') {
       setShowPropertiesDetails(true);
       setShowContactDetails(false);
       setShowTimeLogs(false);
-      setShowTodo(false);
+      setShowGlobalNote(false);
       setShowTimeline(false);
     } else if (rightDetailsSection === 'time') {
       setShowTimeLogs(true);
       setShowContactDetails(false);
       setShowPropertiesDetails(false);
-      setShowTodo(false);
+      setShowGlobalNote(false);
       setShowTimeline(false);
-    } else if (rightDetailsSection === 'todo') {
-      setShowTodo(true);
+    } else if (rightDetailsSection === 'note' || rightDetailsSection === 'todo') {
+      setShowGlobalNote(true);
       setShowContactDetails(false);
       setShowPropertiesDetails(false);
       setShowTimeLogs(false);
@@ -341,7 +363,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setShowContactDetails(false);
       setShowPropertiesDetails(false);
       setShowTimeLogs(false);
-      setShowTodo(false);
+      setShowGlobalNote(false);
     }
   }, [rightDetailsSection]);
 
@@ -354,82 +376,108 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     loadConversation(preselectedId);
   }, [preselectedId, isLoading, loadConversation]);
 
-  // Load persisted To-do tasks for the selected conversation
-  const loadTasks = useCallback(async (conversationId: number) => {
-    if (userRole === 'admin') {
-      setTasks([]);
-      return;
-    }
+  // Global Note handlers
+  const handleSaveGlobalNote = useCallback(async () => {
+    if (!selectedConversation) return;
+    setSavingGlobalNote(true);
     try {
-      const data = await agentApi.listTasks(conversationId);
-      setTasks(data);
+      let res: GlobalNoteResponse;
+      if (userRole === 'admin') {
+        res = await adminApi.updateGlobalNote(selectedConversation.id, globalNoteDraft);
+      } else {
+        res = await agentApi.updateGlobalNote(selectedConversation.id, globalNoteDraft);
+      }
+      setGlobalNote(res.global_note);
+      setGlobalNoteDraft(res.global_note);
+      setGlobalNoteUpdatedAt(res.global_note_updated_at);
+      setGlobalNoteUpdatedByName(res.global_note_updated_by_name);
+      setIsEditingGlobalNote(false);
     } catch (err) {
-      console.error('[ThreePanelWorkspace] Failed to load tasks:', err);
-      setTasks([]);
-    }
-  }, [userRole]);
-
-  useEffect(() => {
-    if (selectedConversation) {
-      loadTasks(selectedConversation.id);
-    } else {
-      setTasks([]);
-    }
-  }, [selectedConversation, loadTasks]);
-
-  const handleAddTask = useCallback(async () => {
-    const title = newTaskTitle.trim();
-    if (!title || !selectedConversation) return;
-    setTaskSaving(true);
-    try {
-      await agentApi.createTask(selectedConversation.id, {
-        title,
-        due_at: newTaskDue ? new Date(newTaskDue).toISOString() : null,
-      });
-      setNewTaskTitle('');
-      setNewTaskDue('');
-      await loadTasks(selectedConversation.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create task');
+      setError(err instanceof Error ? err.message : 'Failed to update global note');
     } finally {
-      setTaskSaving(false);
+      setSavingGlobalNote(false);
     }
-  }, [newTaskTitle, newTaskDue, selectedConversation, loadTasks]);
+  }, [selectedConversation, userRole, globalNoteDraft]);
 
-  const handleToggleTask = useCallback(async (task: ConversationTask) => {
+  const handleTextareaChange = useCallback((
+    value: string,
+    target: 'global_note' | 'message',
+    cursorPos: number
+  ) => {
+    if (target === 'global_note') {
+      setGlobalNoteDraft(value);
+    } else {
+      setMessageInput(value);
+      setCannedSearch(value);
+    }
+
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    if (lastAtIndex !== -1) {
+      const charBeforeAt = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : ' ';
+      if (/[\s\n]/.test(charBeforeAt) || lastAtIndex === 0) {
+        const queryText = textBeforeCursor.slice(lastAtIndex + 1);
+        if (!/[\n\r]/.test(queryText) && queryText.length <= 25) {
+          setMentionQuery(queryText);
+          setMentionTarget(target);
+          setMentionCursorIndex(lastAtIndex);
+          return;
+        }
+      }
+    }
+    setMentionQuery(null);
+    setMentionTarget(null);
+  }, []);
+
+  const insertMention = useCallback((agent: { id: number; full_name: string; email: string }) => {
+    const mentionTag = `@${agent.full_name} `;
+    if (mentionTarget === 'global_note') {
+      const before = globalNoteDraft.slice(0, mentionCursorIndex);
+      const after = globalNoteDraft.slice(mentionCursorIndex + (mentionQuery ? mentionQuery.length + 1 : 1));
+      setGlobalNoteDraft(before + mentionTag + after);
+    } else if (mentionTarget === 'message') {
+      const before = messageInput.slice(0, mentionCursorIndex);
+      const after = messageInput.slice(mentionCursorIndex + (mentionQuery ? mentionQuery.length + 1 : 1));
+      setMessageInput(before + mentionTag + after);
+    }
+    setMentionQuery(null);
+    setMentionTarget(null);
+  }, [mentionTarget, globalNoteDraft, messageInput, mentionCursorIndex, mentionQuery]);
+
+  const matchingAgents = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return agents.filter(a =>
+      a.full_name.toLowerCase().includes(q) ||
+      a.email.toLowerCase().includes(q)
+    ).slice(0, 6);
+  }, [mentionQuery, agents]);
+
+  const handleStatusChange = useCallback(async (targetStatus: string, details?: string) => {
     if (!selectedConversation) return;
-    const nextStatus = task.status === 'done' ? 'open' : 'done';
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t)));
     try {
-      await agentApi.updateTask(selectedConversation.id, task.id, { status: nextStatus });
-      await loadTasks(selectedConversation.id);
+      if (userRole === 'admin') {
+        await adminApi.updateConversationStatus(selectedConversation.id, targetStatus, details);
+      } else {
+        await agentApi.updateStatus(selectedConversation.id, targetStatus, details);
+      }
+      setSelectedConversation(prev => prev ? {
+        ...prev,
+        status: targetStatus as any,
+        assigned_agent_id: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : prev.assigned_agent_id,
+        assigned_agent_name: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : prev.assigned_agent_name,
+      } : null);
+      setConversations(prev => prev.map(c => c.id === selectedConversation.id ? {
+        ...c,
+        status: targetStatus as any,
+        assigned_agent_id: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : c.assigned_agent_id,
+        assigned_agent_name: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : c.assigned_agent_name,
+      } : c));
+      await loadConversation(selectedConversation.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update task');
-      await loadTasks(selectedConversation.id);
+      setError(err instanceof Error ? err.message : 'Failed to update status');
     }
-  }, [selectedConversation, loadTasks]);
-
-  const handleSaveTaskTitle = useCallback(async (task: ConversationTask) => {
-    if (!selectedConversation || !editingTaskTitle.trim()) return;
-    try {
-      await agentApi.updateTask(selectedConversation.id, task.id, { title: editingTaskTitle.trim() });
-      setEditingTaskId(null);
-      setEditingTaskTitle('');
-      await loadTasks(selectedConversation.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update task');
-    }
-  }, [selectedConversation, editingTaskTitle, loadTasks]);
-
-  const handleDeleteTask = useCallback(async (task: ConversationTask) => {
-    if (!selectedConversation) return;
-    try {
-      await agentApi.deleteTask(selectedConversation.id, task.id);
-      await loadTasks(selectedConversation.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete task');
-    }
-  }, [selectedConversation, loadTasks]);
+  }, [selectedConversation, userRole, loadConversation]);
 
   const handleSaveContact = useCallback(async () => {
     if (!selectedConversation || !contactName.trim()) {
@@ -550,10 +598,11 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
 
   const handleSelectConversation = useCallback((conv: ConversationListItem) => {
     setSelectedConversation(conv);
+    loadConversation(conv.id);
     // Update URL
     const basePath = userRole === 'admin' ? '/admin' : '/agent';
     router.push(`${basePath}/conversations/${conv.id}`);
-  }, [router, userRole]);
+  }, [router, userRole, loadConversation]);
 
   const handleQueueChange = useCallback((newQueue: QueueValue) => {
     setQueue(newQueue);
@@ -568,6 +617,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       pending: '/agent/pending',
       assigned: '/agent/assigned',
       unassigned: '/agent/unassigned',
+      waiting: '/agent/pending?status=waiting_on_customer',
+      on_hold: '/agent/pending?status=on_hold',
       resolved: '/agent/resolved',
     };
     router.push(queuePaths[newQueue]);
@@ -739,6 +790,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       if (userRole !== 'agent' || queueFilter === 'all') return true;
       if (queueFilter === 'unassigned') return !c.assigned_agent_id;
       if (queueFilter === 'pending') return c.status === 'pending';
+      if (queueFilter === 'waiting') return c.status === 'waiting_on_customer';
+      if (queueFilter === 'on_hold') return c.status === 'on_hold';
       if (queueFilter === 'ai') return c.status === 'ai_handling';
       return true;
     });
@@ -813,11 +866,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                         className="w-full text-sm px-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">All Statuses</option>
-                        <option value="ai_handling">AI Handling</option>
+                        <option value="open">Open</option>
                         <option value="pending">Pending</option>
-                        <option value="assigned">Assigned</option>
+                        <option value="waiting_on_customer">Waiting on Customer</option>
+                        <option value="on_hold">On Hold</option>
                         <option value="resolved">Resolved</option>
-                        <option value="closed">Closed</option>
+                        <option value="ai_handling">AI Handling</option>
                       </select>
                     </div>
                     <div>
@@ -884,24 +938,26 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
-                    {(['all', 'unassigned', 'pending', 'ai'] as const).map((opt) => (
+                    {(['all', 'pending', 'waiting', 'on_hold', 'unassigned'] as const).map((opt) => (
                       <button
                         key={opt}
                         type="button"
-                        onClick={() => setQueueFilter(opt)}
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
+                        onClick={() => setQueueFilter(opt as any)}
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                           queueFilter === opt
                             ? 'bg-blue-600 text-white border-blue-600'
                             : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
                         }`}
                         aria-pressed={queueFilter === opt}
                       >
-                        {opt === 'ai' ? 'AI' : opt}
+                        {opt === 'waiting' ? 'Waiting' : opt === 'on_hold' ? 'On Hold' : opt.charAt(0).toUpperCase() + opt.slice(1)}
                       </button>
                     ))}
                     <div className="ml-auto flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                       <span>Filter</span>
-                      <Badge variant="default" className="text-[10px]">{queueFilter === 'all' ? 'All' : queueFilter === 'ai' ? 'AI' : queueFilter}</Badge>
+                      <Badge variant="default" className="text-[10px]">
+                        {queueFilter === 'all' ? 'All' : queueFilter === 'waiting' ? 'Waiting' : queueFilter === 'on_hold' ? 'On Hold' : queueFilter}
+                      </Badge>
                     </div>
                   </div>
                   <Input
@@ -1059,9 +1115,64 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
-                    <Badge variant={getStatusBadgeVariant(selectedConversation.status)}>
-                      {selectedConversation.status.replace('_', ' ')}
-                    </Badge>
+                    {/* Interactive Status Selector */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowStatusMenu((v) => !v)}
+                        className="inline-flex items-center gap-1 rounded-full focus:outline-none"
+                        title="Change conversation status"
+                      >
+                        <Badge
+                          variant={getStatusBadgeVariant(selectedConversation.status)}
+                          className="cursor-pointer hover:opacity-90 capitalize"
+                        >
+                          {selectedConversation.status.replace('_', ' ')}
+                          <svg className="ml-1 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </Badge>
+                      </button>
+
+                      {showStatusMenu && (
+                        <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                            Set Status
+                          </div>
+                          {[
+                            { key: 'open', label: 'Open', desc: 'Actively being handled', variant: 'primary' },
+                            { key: 'pending', label: 'Pending', desc: 'Waiting for assignment', variant: 'warning' },
+                            { key: 'waiting_on_customer', label: 'Waiting on Customer', desc: 'Waiting for customer reply', variant: 'ai' },
+                            { key: 'on_hold', label: 'On Hold', desc: 'Paused & unassigned', variant: 'system' },
+                            { key: 'resolved', label: 'Resolved', desc: 'Issue marked resolved', variant: 'success' },
+                          ].map((item) => (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onClick={() => {
+                                setShowStatusMenu(false);
+                                if (item.key === 'resolved') {
+                                  setShowResolveModal(true);
+                                } else {
+                                  handleStatusChange(item.key);
+                                }
+                              }}
+                              className={`flex w-full items-start gap-2 rounded-md p-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                                selectedConversation.status === item.key ? 'bg-slate-100 font-semibold dark:bg-slate-800' : ''
+                              }`}
+                            >
+                              <span className="mt-0.5">
+                                <Badge variant={item.variant as any} className="px-1.5 py-0 text-[10px]">
+                                  {item.label}
+                                </Badge>
+                              </span>
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400">{item.desc}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     <Badge variant={getPriorityBadgeVariant(selectedConversation.priority || 'normal')}>
                       {selectedConversation.priority || 'normal'}
                     </Badge>
@@ -1352,13 +1463,40 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               <div className="flex items-end gap-3">
                 <div className="flex-1">
                   <div className="relative">
+                    {/* Mention Autocomplete Dropdown for Composer */}
+                    {mentionTarget === 'message' && matchingAgents.length > 0 && (
+                      <div className="absolute bottom-full left-0 z-30 mb-2 max-h-48 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                        <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          Mention Agent
+                        </div>
+                        {matchingAgents.map((agent) => (
+                          <button
+                            key={agent.id}
+                            type="button"
+                            onClick={() => insertMention(agent)}
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            <Avatar name={agent.full_name} size="sm" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium text-slate-900 dark:text-white">
+                                {agent.full_name}
+                              </p>
+                              <p className="truncate text-[10px] text-slate-400">{agent.email}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <textarea
                       value={messageInput}
                       onChange={(e) => {
-                        setMessageInput(e.target.value);
-                        setCannedSearch(e.target.value);
+                        handleTextareaChange(e.target.value, 'message', e.target.selectionStart || 0);
                       }}
-                      placeholder={isInternal ? 'Write a private note (only agents can see this)...' : 'Type a message...'}
+                      onKeyUp={(e) => {
+                        const target = e.target as HTMLTextAreaElement;
+                        handleTextareaChange(target.value, 'message', target.selectionStart || 0);
+                      }}
+                      placeholder={isInternal ? 'Write a private note (only agents can see this, type @ to mention)...' : 'Type a message...'}
                       rows={2}
                       className={`w-full px-4 py-2.5 text-sm border rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
                         isInternal
@@ -1622,172 +1760,157 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                    )}
                  </div>
 
-                 {/* To-do */}
-                 <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                   <button
-                     type="button"
-                     className="flex w-full items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
-                     onClick={() => setShowTodo((v) => !v)}
-                   >
-                     <span className="flex items-center gap-2">
-                       To-do
-                       {tasks.filter((t) => t.status !== 'done').length > 0 && (
-                         <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                           {tasks.filter((t) => t.status !== 'done').length}
+                 {/* Global Note (One persistent note per conversation, strictly internal) */}
+                 {userRole !== 'customer' && (
+                   <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                     <div className="flex w-full items-center justify-between gap-2">
+                       <button
+                         type="button"
+                         className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300"
+                         onClick={() => setShowGlobalNote((v) => !v)}
+                       >
+                         <span className="flex items-center gap-1.5">
+                           <svg className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                           </svg>
+                           Global Note
                          </span>
-                       )}
-                     </span>
-                     <svg className={`w-4 h-4 transition-transform ${showTodo ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                     </svg>
-                   </button>
+                         <Badge variant="warning" className="text-[9px] px-1 py-0">Internal</Badge>
+                         <svg className={`w-3.5 h-3.5 transition-transform text-slate-400 ${showGlobalNote ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                         </svg>
+                       </button>
 
-                   {showTodo && (
-                     <div className="mt-2 space-y-2">
-                       {userRole !== 'admin' && (
-                         <div className="space-y-1.5">
-                           <Input
-                             value={newTaskTitle}
-                             onChange={(e) => setNewTaskTitle(e.target.value)}
-                             onKeyDown={(e) => {
-                               if (e.key === 'Enter') {
-                                 e.preventDefault();
-                                 handleAddTask();
-                               }
-                             }}
-                             placeholder="Add a task..."
-                             className="w-full px-2 py-1.5 text-xs"
-                             aria-label="New task title"
-                           />
-                           <div className="flex items-center gap-1.5">
-                             <input
-                               type="datetime-local"
-                               value={newTaskDue}
-                               onChange={(e) => setNewTaskDue(e.target.value)}
-                               className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                               aria-label="Task due date"
-                             />
-                             <Button
-                               variant="outline"
-                               size="sm"
-                               onClick={handleAddTask}
-                               disabled={taskSaving || !newTaskTitle.trim() || !selectedConversation}
-                               className="h-7 px-2 text-xs"
-                             >
-                               Add
-                             </Button>
-                           </div>
-                         </div>
-                       )}
-
-                       {tasks.length === 0 ? (
-                         <p className="text-[11px] text-slate-500 dark:text-slate-400">No tasks yet.</p>
-                       ) : (
-                         <ul className="space-y-1.5">
-                           {(showAllTasks ? tasks : tasks.slice(0, 5)).map((task) => (
-                             <li
-                               key={task.id}
-                               className="rounded border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900"
-                             >
-                               <div className="flex items-start gap-2">
-                                 <button
-                                   type="button"
-                                   onClick={() => handleToggleTask(task)}
-                                   className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${
-                                     task.status === 'done'
-                                       ? 'border-emerald-600 bg-emerald-600 text-white'
-                                       : 'border-slate-300 dark:border-slate-600'
-                                   }`}
-                                   aria-label={task.status === 'done' ? 'Mark task incomplete' : 'Complete task'}
-                                 >
-                                   {task.status === 'done' && (
-                                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                     </svg>
-                                   )}
-                                 </button>
-                                 <div className="min-w-0 flex-1">
-                                   {editingTaskId === task.id ? (
-                                     <div className="flex items-center gap-1">
-                                       <Input
-                                         value={editingTaskTitle}
-                                         onChange={(e) => setEditingTaskTitle(e.target.value)}
-                                         className="h-6 w-full px-1.5 py-0.5 text-[11px]"
-                                         onKeyDown={(e) => {
-                                           if (e.key === 'Enter') {
-                                             e.preventDefault();
-                                             handleSaveTaskTitle(task);
-                                           }
-                                           if (e.key === 'Escape') {
-                                             setEditingTaskId(null);
-                                             setEditingTaskTitle('');
-                                           }
-                                         }}
-                                         autoFocus
-                                       />
-                                       <Button
-                                         variant="ghost"
-                                         size="sm"
-                                         onClick={() => handleSaveTaskTitle(task)}
-                                         className="h-6 px-1.5 text-[11px]"
-                                       >
-                                         Save
-                                       </Button>
-                                     </div>
-                                   ) : (
-                                     <button
-                                       type="button"
-                                       onClick={() => {
-                                         if (userRole === 'admin') return;
-                                         setEditingTaskId(task.id);
-                                         setEditingTaskTitle(task.title);
-                                       }}
-                                       className={`block w-full text-left text-[11px] ${
-                                         task.status === 'done'
-                                           ? 'text-slate-400 line-through dark:text-slate-500'
-                                           : 'text-slate-700 dark:text-slate-200'
-                                       }`}
-                                     >
-                                       {task.title}
-                                     </button>
-                                   )}
-                                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
-                                     <span className="capitalize">{task.status}</span>
-                                     {task.due_at && (
-                                       <span>Due {formatFullTimestamp(task.due_at)}</span>
-                                     )}
-                                   </div>
-                                 </div>
-                                 {userRole !== 'admin' && (
-                                   <button
-                                     type="button"
-                                     onClick={() => handleDeleteTask(task)}
-                                     className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                                     aria-label="Delete task"
-                                   >
-                                     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
-                                     </svg>
-                                   </button>
-                                 )}
-                               </div>
-                             </li>
-                           ))}
-                         </ul>
-                       )}
-
-                       {tasks.length > 5 && (
+                       {!isEditingGlobalNote && (
                          <button
                            type="button"
-                           onClick={() => setShowAllTasks((v) => !v)}
-                           className="text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
+                           onClick={() => {
+                             setGlobalNoteDraft(globalNote);
+                             setIsEditingGlobalNote(true);
+                           }}
+                           className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
                          >
-                           {showAllTasks ? 'Show fewer' : `View all ${tasks.length} tasks`}
+                           {globalNote ? 'Edit' : '+ Add Note'}
                          </button>
                        )}
                      </div>
-                   )}
-                 </div>
+
+                     {showGlobalNote && (
+                       <div className="mt-2.5">
+                         {isEditingGlobalNote ? (
+                           <div className="space-y-2">
+                             <div className="relative">
+                               <textarea
+                                 value={globalNoteDraft}
+                                 onChange={(e) => handleTextareaChange(e.target.value, 'global_note', e.target.selectionStart || 0)}
+                                 onKeyUp={(e) => {
+                                   const target = e.target as HTMLTextAreaElement;
+                                   handleTextareaChange(target.value, 'global_note', target.selectionStart || 0);
+                                 }}
+                                 rows={4}
+                                 placeholder="Write shared conversation notes, handoff context, or action items... (Type @ to mention team members)"
+                                 className="w-full rounded-md border border-slate-300 bg-white p-2 text-xs text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                                 autoFocus
+                               />
+
+                               {/* Mention autocomplete dropdown */}
+                               {mentionTarget === 'global_note' && matchingAgents.length > 0 && (
+                                 <div className="absolute left-0 top-full z-30 mt-1 max-h-48 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                                   <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                     Mention Agent
+                                   </div>
+                                   {matchingAgents.map((agent) => (
+                                     <button
+                                       key={agent.id}
+                                       type="button"
+                                       onClick={() => insertMention(agent)}
+                                       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800"
+                                     >
+                                       <Avatar name={agent.full_name} size="sm" />
+                                       <div className="min-w-0 flex-1">
+                                         <p className="truncate font-medium text-slate-900 dark:text-white">
+                                           {agent.full_name}
+                                         </p>
+                                         <p className="truncate text-[10px] text-slate-400">{agent.email}</p>
+                                       </div>
+                                     </button>
+                                   ))}
+                                 </div>
+                               )}
+                             </div>
+
+                             <div className="flex items-center justify-between text-[11px] text-slate-400">
+                               <span>Type <span className="font-semibold text-slate-600 dark:text-slate-300">@</span> to tag agents</span>
+                               <div className="flex items-center gap-1.5">
+                                 <Button
+                                   variant="ghost"
+                                   size="sm"
+                                   onClick={() => {
+                                     setIsEditingGlobalNote(false);
+                                     setGlobalNoteDraft(globalNote);
+                                     setMentionTarget(null);
+                                   }}
+                                   disabled={savingGlobalNote}
+                                   className="h-6 px-2 text-xs"
+                                 >
+                                   Cancel
+                                 </Button>
+                                 <Button
+                                   size="sm"
+                                   onClick={handleSaveGlobalNote}
+                                   disabled={savingGlobalNote}
+                                   className="h-6 px-3 text-xs"
+                                 >
+                                   {savingGlobalNote ? 'Saving...' : 'Save Note'}
+                                 </Button>
+                               </div>
+                             </div>
+                           </div>
+                         ) : (
+                           <div>
+                             {globalNote ? (
+                               <div className="rounded border border-amber-200/70 bg-amber-50/50 p-2.5 dark:border-amber-900/40 dark:bg-amber-950/20">
+                                 <div className="text-xs leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-wrap">
+                                   {globalNote.split(/(@[a-zA-Z0-9_\s.-]+?)(?=[,\.!?\s]|$)/g).map((part, i) =>
+                                     part.startsWith('@') ? (
+                                       <span key={i} className="inline-flex items-center rounded bg-indigo-100 px-1 py-0.5 text-[11px] font-semibold text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300">
+                                         {part}
+                                       </span>
+                                     ) : (
+                                       <span key={i}>{part}</span>
+                                     )
+                                   )}
+                                 </div>
+                                 {globalNoteUpdatedAt && (
+                                   <div className="mt-2 flex items-center justify-between border-t border-amber-200/50 pt-1.5 text-[10px] text-slate-500 dark:border-amber-900/30 dark:text-slate-400">
+                                     <span>
+                                       Updated by <span className="font-medium text-slate-700 dark:text-slate-300">{globalNoteUpdatedByName || 'Agent'}</span>
+                                     </span>
+                                     <span>{formatFullTimestamp(globalNoteUpdatedAt)}</span>
+                                   </div>
+                                 )}
+                               </div>
+                             ) : (
+                               <div className="rounded border border-dashed border-slate-300 p-3 text-center text-xs text-slate-400 dark:border-slate-700">
+                                 <p>No internal global note for this conversation.</p>
+                                 <button
+                                   type="button"
+                                   onClick={() => {
+                                     setGlobalNoteDraft('');
+                                     setIsEditingGlobalNote(true);
+                                   }}
+                                   className="mt-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                                 >
+                                   Click to add note
+                                 </button>
+                               </div>
+                             )}
+                           </div>
+                         )}
+                       </div>
+                     )}
+                   </div>
+                 )}
 
 
                  {/* Conversation Properties */}

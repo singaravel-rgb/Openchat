@@ -273,6 +273,10 @@ def detect_sensitive_or_restricted(text: str, rules: dict[str, Any]) -> tuple[bo
         for p in SENSITIVE_PATTERNS:
             if re.search(p, t):
                 return True, "Sensitive or account/billing/security-related request requires human assistance"
+        custom_topics = rules.get("sensitive_topics") or []
+        for topic in custom_topics:
+            if topic and str(topic).strip().lower() in t:
+                return True, f"Request matches restricted sensitive topic: '{topic}'"
     return False, None
 
 
@@ -647,6 +651,11 @@ async def process_ai_turn(
     completion_tokens = int(usage.get("completion_tokens") or 0)
     total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
     cost = estimate_cost(provider_used, model_used, prompt_tokens, completion_tokens)
+
+    if should_escalate and decision == "escalate" and not knowledge_hits:
+        custom_fallback = (runtime.escalation_rules or {}).get("fallback_response")
+        if custom_fallback and custom_fallback.strip():
+            validated = custom_fallback.strip()
 
     return AIProcessingResult(
         answer=validated,

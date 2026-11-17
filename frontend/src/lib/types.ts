@@ -36,10 +36,13 @@ export interface Conversation {
 }
 
 export type ConversationStatus =
-  | 'ai_handling'
+  | 'open'
   | 'pending'
-  | 'assigned'
   | 'resolved'
+  | 'waiting_on_customer'
+  | 'on_hold'
+  | 'ai_handling'
+  | 'assigned'
   | 'closed';
 
 export interface ConversationListItem extends Conversation {
@@ -73,6 +76,10 @@ export interface ConversationDetail extends Conversation {
   assignment_history?: Array<Record<string, unknown>>;
   attachments?: Attachment[];
   custom_fields?: ConversationCustomFieldValue[];
+  global_note?: string | null;
+  global_note_updated_at?: string | null;
+  global_note_updated_by_id?: number | null;
+  global_note_updated_by_name?: string | null;
   // Mirrors of the inbox card fields, returned by the detail endpoint so a
   // conversation can be reselected after refresh or from a notification link.
   customer_name?: string | null;
@@ -139,6 +146,9 @@ export interface AdminStats {
     ai_handling: number;
     pending: number;
     assigned: number;
+    open?: number;
+    on_hold?: number;
+    waiting_on_customer?: number;
     resolved: number;
     closed: number;
     today: number;
@@ -901,4 +911,49 @@ export interface Attachment {
 export interface AttachmentUploadResponse {
   attachment: Attachment;
   message: string;
+}
+
+
+export interface GlobalNoteResponse {
+  global_note: string;
+  global_note_updated_at: string;
+  global_note_updated_by_id: number;
+  global_note_updated_by_name: string;
+  mentioned_agents: string[];
+}
+
+export interface AIFlowStage {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  detail: string;
+  trigger?: string;
+}
+
+export interface AIFlowConfig {
+  provider: string;
+  model: string;
+  confidence_threshold: number;
+  temperature: number;
+  max_tokens: number;
+  max_ai_turns: number;
+  escalate_on_human_request: boolean;
+  escalate_on_sensitive: boolean;
+  escalate_on_uncertain: boolean;
+  auto_resolve_enabled: boolean;
+  suggest_replies_to_agents: boolean;
+  sensitive_topics: string[];
+  restricted_categories: string[];
+  fallback_response: string;
+  knowledge_sources: {
+    faqs: boolean;
+    articles: boolean;
+  };
+}
+
+export interface AIFlowResponse {
+  flow_enabled: boolean;
+  stages: AIFlowStage[];
+  config: AIFlowConfig;
 }

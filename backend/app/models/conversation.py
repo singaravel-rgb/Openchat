@@ -92,6 +92,14 @@ class Conversation(Base):
     customer_last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     agent_last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Persistent Global Note (one per conversation, internal only)
+    global_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    global_note_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    global_note_updated_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # SLA tracking fields
     sla_response_due_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -128,6 +136,11 @@ class Conversation(Base):
     )
 
     sla_config = relationship("SLAConfig")
+
+    global_note_updated_by = relationship(
+        "User",
+        foreign_keys=[global_note_updated_by_id],
+    )
 
     messages = relationship(
         Message,

@@ -2,10 +2,14 @@ from enum import StrEnum
 
 
 class ConversationStatus(StrEnum):
-    AI_HANDLING = "ai_handling"
+    OPEN = "open"
     PENDING = "pending"
-    ASSIGNED = "assigned"
     RESOLVED = "resolved"
+    WAITING_ON_CUSTOMER = "waiting_on_customer"
+    ON_HOLD = "on_hold"
+    # Legacy / alias values for backward compatibility
+    ASSIGNED = "assigned"
+    AI_HANDLING = "ai_handling"
     CLOSED = "closed"
 
 

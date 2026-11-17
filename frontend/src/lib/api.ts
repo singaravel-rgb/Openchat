@@ -1,4 +1,4 @@
-import type { Token, User, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, AuditLogItem, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch } from './types';
+import type { Token, User, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, AuditLogItem, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch, GlobalNoteResponse, AIFlowConfig, AIFlowResponse } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -105,6 +105,12 @@ export const conversationApi = {
 
   reopen: (id: number) =>
     fetchApi<ConversationDetail>(`/conversations/${id}/reopen`, { method: 'POST' }),
+
+  updateGlobalNote: (id: number, content: string) =>
+    fetchApi<GlobalNoteResponse>(`/conversations/${id}/global-note`, {
+      method: 'PATCH',
+      body: JSON.stringify({ note: content, content }),
+    }),
 };
 
 export const agentApi = {
@@ -144,6 +150,18 @@ export const agentApi = {
 
   reopenConversation: (id: number) =>
     fetchApi<{ message: string }>(`/agent/conversations/${id}/reopen`, { method: 'POST' }),
+
+  updateStatus: (id: number, status: string, resolution_details?: string) =>
+    fetchApi<{ message: string }>(`/agent/conversations/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status, resolution_details }),
+    }),
+
+  updateGlobalNote: (id: number, content: string) =>
+    fetchApi<GlobalNoteResponse>(`/agent/conversations/${id}/global-note`, {
+      method: 'PATCH',
+      body: JSON.stringify({ note: content, content }),
+    }),
 
   suggestAgentReply: (id: number) =>
     fetchApi<{ draft: string; provider: string; usage: Record<string, unknown>; sources: Array<{ type: string; id: number; title: string; excerpt: string | null; score: number }> }>(`/agent/conversations/${id}/ai-suggest`, { method: 'POST' }),
@@ -293,6 +311,12 @@ export const adminApi = {
 
   updateConversationStatus: (id: number, status: string, resolution_details?: string) =>
     fetchApi<{ message: string }>(`/admin/conversations/${id}/status`, { method: 'POST', body: JSON.stringify({ status, resolution_details }) }),
+
+  updateGlobalNote: (id: number, content: string) =>
+    fetchApi<GlobalNoteResponse>(`/admin/conversations/${id}/global-note`, {
+      method: 'PATCH',
+      body: JSON.stringify({ note: content, content }),
+    }),
 
   sendMessage: (id: number, data: MessageCreate) =>
     fetchApi<ConversationDetail['messages'][0]>(`/admin/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify(data) }),
@@ -469,6 +493,8 @@ export const adminApi = {
   updateAIConfig: (data: AIConfigUpdate) => fetchApi<AIConfig>('/admin/ai/config', { method: 'PUT', body: JSON.stringify(data) }),
   testAIProvider: (data: AITestRequest) => fetchApi<AITestResponse>('/admin/ai/test', { method: 'POST', body: JSON.stringify(data) }),
   getAIUsage: (conversationId?: number) => fetchApi<AIUsageSummary>(`/admin/ai/usage${conversationId ? `?conversation_id=${conversationId}` : ''}`),
+  getAIFlow: () => fetchApi<AIFlowResponse>('/admin/ai/flow'),
+  updateAIFlow: (data: Partial<AIFlowConfig>) => fetchApi<AIFlowResponse>('/admin/ai/flow', { method: 'PUT', body: JSON.stringify(data) }),
 
   // Settings
   getSettings: (category: string) => fetchApi<SettingResponse[]>(`/admin/settings/${category}`),

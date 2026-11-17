@@ -16,6 +16,7 @@ from app.schemas.conversation import (
     MessageCreate,
     MessageResponse,
     ConversationUpdate,
+    GlobalNoteUpdate,
 )
 from app.schemas.csat import CSATRatingCreate, CSATRatingResponse
 from app.services.conversation_service import (
@@ -27,6 +28,7 @@ from app.services.conversation_service import (
     mark_conversation_read,
     update_conversation_properties,
     reopen_conversation,
+    update_global_note,
 )
 from app.services.sla_service import apply_sla_to_conversation
 
@@ -118,6 +120,10 @@ def get_conversation(
         customer_last_read_at=getattr(conversation, "customer_last_read_at", None),
         agent_last_read_at=getattr(conversation, "agent_last_read_at", None),
         assignment_history=getattr(conversation, "assignment_history", []) or [],
+        global_note=conversation.global_note if include_internal else None,
+        global_note_updated_at=conversation.global_note_updated_at if include_internal else None,
+        global_note_updated_by_id=conversation.global_note_updated_by_id if include_internal else None,
+        global_note_updated_by_name=(conversation.global_note_updated_by.full_name if conversation.global_note_updated_by else None) if include_internal else None,
         messages=[
 MessageResponse(
                   id=m.id,
@@ -259,3 +265,21 @@ def get_csat_rating(
 
     rating = db.query(CSATRating).filter(CSATRating.conversation_id == conversation_id).first()
     return rating
+
+
+@router.patch("/{conversation_id}/global-note")
+def update_global_note_endpoint(
+    conversation_id: int,
+    data: GlobalNoteUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update persistent Global Internal Note. Strictly forbidden for customers."""
+    if current_user.role not in ("agent", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden: only agents and admins can access internal notes")
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+    res = update_global_note(db, conversation, data.text, current_user)
+    return res

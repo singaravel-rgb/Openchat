@@ -247,3 +247,85 @@ def get_ai_usage(
 def _utcnow():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)
+
+
+
+@router.get("/flow")
+def get_ai_flow(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    cfg = get_or_create_ai_config(db)
+    rules = dict(cfg.escalation_rules or {})
+    ks = dict(cfg.knowledge_sources or {"faqs": True, "articles": True})
+
+    stages = [
+        {"id": "start", "name": "Customer Initiates", "type": "trigger", "status": "active" if cfg.ai_enabled else "inactive", "detail": "Customer submits message via web widget or chat"},
+        {"id": "intent", "name": "Intent & Safety Detection", "type": "detection", "status": "active", "detail": "Scans for prompt injection, human agent request, or sensitive topics"},
+        {"id": "retrieval", "name": "Knowledge Retrieval", "type": "retrieval", "status": "active", "detail": f"Searches FAQs ({'enabled' if ks.get('faqs') else 'disabled'}) and Articles ({'enabled' if ks.get('articles') else 'disabled'})"},
+        {"id": "confidence", "name": "Confidence Evaluation", "type": "decision", "status": "active", "detail": f"Confidence threshold required: {int(cfg.confidence_threshold * 100)}%"},
+        {"id": "generation", "name": "Grounded AI Response", "type": "ai", "status": "active", "detail": f"Generates response with {cfg.provider} ({cfg.model})"},
+        {"id": "resolution", "name": "Resolution Decision", "type": "decision", "status": "active", "detail": "Auto-resolve enabled: " + ("Yes" if rules.get("auto_resolve_enabled") else "No (requires human verification)")},
+        {"id": "escalation", "name": "Human Escalation Rule", "type": "escalation", "status": "active", "detail": f"Escalates on sensitive topic, low confidence, or {rules.get('max_ai_turns', 5)} max attempts"},
+        {"id": "assignment", "name": "Agent Queue & Assignment", "type": "assignment", "status": "active", "detail": "Routes conversation to agent workload pool based on FIFO capacity"},
+        {"id": "completion", "name": "Turn Completion", "type": "complete", "status": "active", "detail": "AI stops customer messages; human agent takes conversation"}
+    ]
+
+    return {
+        "flow_enabled": cfg.ai_enabled,
+        "stages": stages,
+        "config": {
+            "provider": cfg.provider,
+            "model": cfg.model,
+            "confidence_threshold": cfg.confidence_threshold,
+            "temperature": cfg.temperature,
+            "max_tokens": cfg.max_tokens,
+            "max_ai_turns": rules.get("max_ai_turns", 5),
+            "escalate_on_human_request": rules.get("escalate_on_human_request", True),
+            "escalate_on_sensitive": rules.get("escalate_on_sensitive", True),
+            "escalate_on_uncertain": rules.get("escalate_on_uncertain", True),
+            "auto_resolve_enabled": rules.get("auto_resolve_enabled", False),
+            "suggest_replies_to_agents": rules.get("suggest_replies_to_agents", True),
+            "sensitive_topics": rules.get("sensitive_topics", ["refund", "billing", "security", "legal", "password"]),
+            "restricted_categories": rules.get("restricted_categories", []),
+            "fallback_response": rules.get("fallback_response", "I don't have enough verified information to answer that confidently. Connecting you with a support agent."),
+            "knowledge_sources": ks,
+        }
+    }
+
+
+@router.put("/flow")
+def update_ai_flow(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    cfg = get_or_create_ai_config(db)
+    if "flow_enabled" in payload:
+        cfg.ai_enabled = bool(payload["flow_enabled"])
+    
+    cfg_data = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    if "provider" in cfg_data and cfg_data["provider"]:
+        cfg.provider = str(cfg_data["provider"]).strip().lower()
+    if "model" in cfg_data and cfg_data["model"]:
+        cfg.model = str(cfg_data["model"]).strip()
+    if "confidence_threshold" in cfg_data and cfg_data["confidence_threshold"] is not None:
+        cfg.confidence_threshold = float(cfg_data["confidence_threshold"])
+    if "temperature" in cfg_data and cfg_data["temperature"] is not None:
+        cfg.temperature = float(cfg_data["temperature"])
+    if "max_tokens" in cfg_data and cfg_data["max_tokens"] is not None:
+        cfg.max_tokens = int(cfg_data["max_tokens"])
+
+    rules = dict(cfg.escalation_rules or {})
+    for key in ("max_ai_turns", "escalate_on_human_request", "escalate_on_sensitive", "escalate_on_uncertain", "auto_resolve_enabled", "suggest_replies_to_agents", "sensitive_topics", "restricted_categories", "fallback_response"):
+        if key in cfg_data:
+            rules[key] = cfg_data[key]
+    cfg.escalation_rules = rules
+
+    if "knowledge_sources" in cfg_data:
+        cfg.knowledge_sources = dict(cfg_data["knowledge_sources"])
+
+    db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+    return get_ai_flow(db, current_user)

@@ -79,7 +79,13 @@ def list_conversations_query(
             query = query.filter(Conversation.customer_id == customer_id)
 
     if status_filter:
-        query = query.filter(Conversation.status == status_filter)
+        s = status_filter.lower()
+        if s == "open":
+            query = query.filter(Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED]))
+        elif s == "resolved":
+            query = query.filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
+        else:
+            query = query.filter(Conversation.status == s)
 
     if q:
         like = f"%{q}%"
@@ -105,11 +111,65 @@ def list_conversations_query(
 
 
 ALLOWED_TRANSITIONS = {
-    ConversationStatus.AI_HANDLING: {ConversationStatus.ASSIGNED, ConversationStatus.PENDING, ConversationStatus.RESOLVED, ConversationStatus.CLOSED},
-    ConversationStatus.PENDING: {ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING, ConversationStatus.RESOLVED, ConversationStatus.CLOSED},
-    ConversationStatus.ASSIGNED: {ConversationStatus.PENDING, ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.AI_HANDLING},
-    ConversationStatus.RESOLVED: {ConversationStatus.PENDING, ConversationStatus.CLOSED, ConversationStatus.ASSIGNED},
-    ConversationStatus.CLOSED: {ConversationStatus.PENDING},
+    ConversationStatus.OPEN: {
+        ConversationStatus.PENDING,
+        ConversationStatus.RESOLVED,
+        ConversationStatus.WAITING_ON_CUSTOMER,
+        ConversationStatus.ON_HOLD,
+        ConversationStatus.CLOSED,
+    },
+    ConversationStatus.PENDING: {
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.ON_HOLD,
+        ConversationStatus.WAITING_ON_CUSTOMER,
+        ConversationStatus.RESOLVED,
+        ConversationStatus.CLOSED,
+        ConversationStatus.AI_HANDLING,
+    },
+    ConversationStatus.WAITING_ON_CUSTOMER: {
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.PENDING,
+        ConversationStatus.RESOLVED,
+        ConversationStatus.ON_HOLD,
+        ConversationStatus.CLOSED,
+    },
+    ConversationStatus.ON_HOLD: {
+        ConversationStatus.PENDING,
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.RESOLVED,
+    },
+    ConversationStatus.RESOLVED: {
+        ConversationStatus.PENDING,
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.CLOSED,
+    },
+    # Backward compatibility for legacy / internal statuses:
+    ConversationStatus.ASSIGNED: {
+        ConversationStatus.PENDING,
+        ConversationStatus.RESOLVED,
+        ConversationStatus.WAITING_ON_CUSTOMER,
+        ConversationStatus.ON_HOLD,
+        ConversationStatus.OPEN,
+        ConversationStatus.CLOSED,
+    },
+    ConversationStatus.AI_HANDLING: {
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.PENDING,
+        ConversationStatus.RESOLVED,
+        ConversationStatus.ON_HOLD,
+        ConversationStatus.CLOSED,
+    },
+    ConversationStatus.CLOSED: {
+        ConversationStatus.PENDING,
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.RESOLVED,
+    },
 }
 
 
@@ -130,10 +190,15 @@ def transition_status(
     if ConversationStatus(new_status) not in allowed and new_status not in {s.value for s in allowed}:
         raise HTTPException(status_code=409, detail=f"Invalid status transition: {current} -> {new_status}")
 
-    if conversation.assigned_agent_id and current in (ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING) and new_status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.PENDING):
-        # release capacity when leaving active assignment
+    # Handle agent capacity release when leaving active assignment or placing on hold
+    if conversation.assigned_agent_id and new_status in (
+        ConversationStatus.RESOLVED,
+        ConversationStatus.CLOSED,
+        ConversationStatus.PENDING,
+        ConversationStatus.ON_HOLD,
+    ):
         release_agent_capacity(db, conversation.assigned_agent_id)
-        if new_status == ConversationStatus.PENDING:
+        if new_status in (ConversationStatus.PENDING, ConversationStatus.ON_HOLD):
             conversation.assigned_agent_id = None
 
     conversation.status = new_status
@@ -151,7 +216,7 @@ def transition_status(
         if resolution_details is not None:
             conversation.resolution_details = resolution_details
         record_resolution(db, conversation)
-    elif new_status in (ConversationStatus.ASSIGNED, ConversationStatus.PENDING, ConversationStatus.AI_HANDLING):
+    elif new_status in (ConversationStatus.OPEN, ConversationStatus.ASSIGNED, ConversationStatus.PENDING, ConversationStatus.AI_HANDLING):
         if current in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
             conversation.closed_at = None
             conversation.resolved_at = None
@@ -306,10 +371,87 @@ def add_message(
     if not is_internal:
         if sender.role == "customer":
             conversation.customer_last_read_at = _utcnow()
+            # If conversation was waiting_on_customer, customer reply makes it eligible for handling again
+            if conversation.status == ConversationStatus.WAITING_ON_CUSTOMER:
+                new_st = ConversationStatus.OPEN if conversation.assigned_agent_id else ConversationStatus.PENDING
+                transition_status(db, conversation, new_st.value, sender)
         else:
             conversation.agent_last_read_at = _utcnow()
 
     return message
+
+
+def update_global_note(
+    db: Session,
+    conversation: Conversation,
+    note: str,
+    actor: User,
+) -> dict:
+    """Update the persistent Global Internal Note for this conversation. Never exposed to customers."""
+    import re
+    from app.models.notification import NotificationType, NotificationPriority
+    from app.services.notification_service import create_notification
+
+    conversation.global_note = note
+    conversation.global_note_updated_at = _utcnow()
+    conversation.global_note_updated_by_id = actor.id
+
+    # Parse @mentions for agents/admins
+    mentioned_users = []
+    all_agents = db.query(User).filter(User.role.in_(["agent", "admin"]), User.is_active == True).all()  # noqa: E712
+    notified_ids = set()
+    note_lower = (note or "").lower()
+
+    for agent in all_agents:
+        if agent.id == actor.id:
+            continue
+        name_tag = f"@{agent.full_name.lower()}"
+        email_tag = f"@{agent.email.lower()}"
+        first_name = agent.full_name.split()[0].lower() if agent.full_name else ""
+        first_name_tag = f"@{first_name}" if len(first_name) >= 3 else None
+
+        is_mentioned = (
+            name_tag in note_lower or
+            email_tag in note_lower or
+            (first_name_tag and (first_name_tag + " ") in (note_lower + " "))
+        )
+
+        if is_mentioned and agent.id not in notified_ids:
+            notified_ids.add(agent.id)
+            mentioned_users.append(agent)
+            create_notification(
+                db=db,
+                user_id=agent.id,
+                type=NotificationType.MENTION,
+                title=f"Mentioned in Conversation #{conversation.id}",
+                message=f"{actor.full_name} mentioned you in the internal note for conversation #{conversation.id}",
+                reference_type="conversation",
+                reference_id=conversation.id,
+                priority=NotificationPriority.NORMAL,
+            )
+            record_system_event(
+                db,
+                conversation,
+                f"{actor.full_name} mentioned {agent.full_name} in the internal note",
+                actor_id=actor.id,
+            )
+
+    record_system_event(
+        db,
+        conversation,
+        f"Global internal note updated by {actor.full_name}",
+        actor_id=actor.id,
+    )
+    db.commit()
+    db.refresh(conversation)
+
+    return {
+        "global_note": conversation.global_note,
+        "global_note_updated_at": conversation.global_note_updated_at,
+        "global_note_updated_by_id": conversation.global_note_updated_by_id,
+        "global_note_updated_by_name": actor.full_name,
+        "mentioned_agents": [u.full_name for u in mentioned_users],
+    }
 
 
 def reopen_conversation(db: Session, conversation: Conversation, actor: User) -> Conversation:

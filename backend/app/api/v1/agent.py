@@ -20,6 +20,7 @@ from app.schemas.conversation import (
     AssignRequest,
     StatusUpdateRequest,
     ConversationUpdate,
+    GlobalNoteUpdate,
 )
 from app.schemas.conversation_task import (
     ConversationTaskCreate,
@@ -42,6 +43,8 @@ from app.services.conversation_service import (
     close_conversation as svc_close,
     update_conversation_properties,
     assign_conversation as svc_assign,
+    transition_status,
+    update_global_note,
 )
 from app.services.ai_service import get_or_create_ai_config, get_runtime_ai_config, retrieve_knowledge_hits, generate_with_provider, format_knowledge_context
 
@@ -107,6 +110,10 @@ def _conversation_detail(
         customer_last_read_at=getattr(conversation, "customer_last_read_at", None),
         agent_last_read_at=getattr(conversation, "agent_last_read_at", None),
         assignment_history=getattr(conversation, "assignment_history", []) or [],
+        global_note=conversation.global_note,
+        global_note_updated_at=conversation.global_note_updated_at,
+        global_note_updated_by_id=conversation.global_note_updated_by_id,
+        global_note_updated_by_name=conversation.global_note_updated_by.full_name if conversation.global_note_updated_by else None,
         messages=[
             MessageResponse(
                 id=m.id,
@@ -313,6 +320,72 @@ def reopen_conversation(
     svc_reopen(db, conversation, current_user)
     db.commit()
     return {"message": "Conversation reopened successfully"}
+
+
+@router.patch("/conversations/{conversation_id}/global-note")
+def update_global_note_agent(
+    conversation_id: int,
+    data: GlobalNoteUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_modify(current_user, conversation)
+    res = update_global_note(db, conversation, data.text, current_user)
+    return res
+
+
+@router.post("/conversations/{conversation_id}/status")
+def update_conversation_status_agent(
+    conversation_id: int,
+    data: StatusUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_modify(current_user, conversation)
+    if not data.status:
+        raise HTTPException(status_code=400, detail="status is required")
+
+    target_status = data.status.lower()
+    if target_status == "open":
+        target_status = ConversationStatus.OPEN
+    elif target_status == "resolved":
+        target_status = ConversationStatus.RESOLVED
+    elif target_status == "pending":
+        target_status = ConversationStatus.PENDING
+    elif target_status == "waiting_on_customer":
+        target_status = ConversationStatus.WAITING_ON_CUSTOMER
+    elif target_status == "on_hold":
+        if current_user.role != "admin" and conversation.assigned_agent_id is not None:
+            raise HTTPException(status_code=403, detail="Only administrators can place assigned conversations On Hold")
+        target_status = ConversationStatus.ON_HOLD
+
+    if target_status == ConversationStatus.RESOLVED:
+        svc_resolve(db, conversation, current_user, resolution_details=data.resolution_details)
+    elif target_status == ConversationStatus.CLOSED:
+        svc_close(db, conversation, current_user, resolution_details=data.resolution_details)
+    elif target_status in (
+        ConversationStatus.PENDING,
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.WAITING_ON_CUSTOMER,
+        ConversationStatus.ON_HOLD,
+    ):
+        if conversation.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
+            svc_reopen(db, conversation, current_user)
+            if target_status != conversation.status:
+                transition_status(db, conversation, target_status, current_user)
+        else:
+            transition_status(db, conversation, target_status, current_user)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported status")
+    db.commit()
+    return {"message": "Conversation status updated"}
 
 
 @router.get("/workload")

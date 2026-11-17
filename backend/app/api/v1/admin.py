@@ -19,6 +19,7 @@ from app.schemas.conversation import (
     ConversationListItem,
     ConversationDetail,
     ConversationUpdate,
+    GlobalNoteUpdate,
     AssignRequest,
     StatusUpdateRequest,
     MessageCreate,
@@ -36,6 +37,7 @@ from app.services.conversation_service import (
     reopen_conversation as svc_reopen,
     resolve_conversation as svc_resolve,
     mark_conversation_read,
+    update_global_note,
 )
 from app.services.sla_service import record_first_response
 
@@ -53,10 +55,12 @@ def get_admin_stats(
 ):
     total_conversations = db.query(Conversation).count()
     pending_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.PENDING).count()
-    assigned_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.ASSIGNED).count()
+    assigned_conversations = db.query(Conversation).filter(Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN])).count()
     ai_handling_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.AI_HANDLING).count()
-    resolved_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.RESOLVED).count()
+    resolved_conversations = db.query(Conversation).filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED])).count()
     closed_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.CLOSED).count()
+    on_hold_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.ON_HOLD).count()
+    waiting_on_customer_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.WAITING_ON_CUSTOMER).count()
 
     total_agents = db.query(User).filter(User.role == "agent", User.is_active == True).count()  # noqa: E712
     available_agents = (
@@ -91,6 +95,9 @@ def get_admin_stats(
             "ai_handling": ai_handling_conversations,
             "pending": pending_conversations,
             "assigned": assigned_conversations,
+            "open": assigned_conversations,
+            "on_hold": on_hold_conversations,
+            "waiting_on_customer": waiting_on_customer_conversations,
             "resolved": resolved_conversations,
             "closed": closed_conversations,
             "today": conversations_today,
@@ -343,8 +350,26 @@ def get_conversation_admin(
         customer_last_read_at=getattr(conversation, "customer_last_read_at", None),
         agent_last_read_at=getattr(conversation, "agent_last_read_at", None),
         assignment_history=getattr(conversation, "assignment_history", []) or [],
+        global_note=conversation.global_note,
+        global_note_updated_at=conversation.global_note_updated_at,
+        global_note_updated_by_id=conversation.global_note_updated_by_id,
+        global_note_updated_by_name=conversation.global_note_updated_by.full_name if conversation.global_note_updated_by else None,
         messages=[MessageResponse.model_validate(m) for m in messages],
     )
+
+
+@router.patch("/conversations/{conversation_id}/global-note")
+def update_global_note_admin(
+    conversation_id: int,
+    data: GlobalNoteUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    res = update_global_note(db, conversation, data.text, current_user)
+    return res
 
 
 @router.patch("/conversations/{conversation_id}")
@@ -390,19 +415,37 @@ def update_conversation_status_admin(
         raise HTTPException(status_code=404, detail="Conversation not found")
     if not data.status:
         raise HTTPException(status_code=400, detail="status is required")
-    if data.status == ConversationStatus.RESOLVED:
+
+    target_status = data.status.lower()
+    if target_status == "open":
+        target_status = ConversationStatus.OPEN
+    elif target_status == "resolved":
+        target_status = ConversationStatus.RESOLVED
+    elif target_status == "pending":
+        target_status = ConversationStatus.PENDING
+    elif target_status == "on_hold":
+        target_status = ConversationStatus.ON_HOLD
+    elif target_status == "waiting_on_customer":
+        target_status = ConversationStatus.WAITING_ON_CUSTOMER
+
+    if target_status == ConversationStatus.RESOLVED:
         svc_resolve(db, conversation, current_user, resolution_details=data.resolution_details)
-    elif data.status == ConversationStatus.CLOSED:
+    elif target_status == ConversationStatus.CLOSED:
         svc_close(db, conversation, current_user, resolution_details=data.resolution_details)
-    elif data.status in (ConversationStatus.PENDING, ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING):
-        if data.status == ConversationStatus.ASSIGNED and not conversation.assigned_agent_id:
-            raise HTTPException(status_code=409, detail="Assign an agent before setting status to assigned")
+    elif target_status in (
+        ConversationStatus.PENDING,
+        ConversationStatus.OPEN,
+        ConversationStatus.ASSIGNED,
+        ConversationStatus.AI_HANDLING,
+        ConversationStatus.ON_HOLD,
+        ConversationStatus.WAITING_ON_CUSTOMER,
+    ):
         if conversation.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
             svc_reopen(db, conversation, current_user)
-            if data.status != conversation.status:
-                transition_status(db, conversation, data.status, current_user)
+            if target_status != conversation.status:
+                transition_status(db, conversation, target_status, current_user)
         else:
-            transition_status(db, conversation, data.status, current_user)
+            transition_status(db, conversation, target_status, current_user)
     else:
         raise HTTPException(status_code=400, detail="Unsupported status")
     db.commit()

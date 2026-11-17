@@ -60,9 +60,28 @@ class ConversationResponse(BaseModel):
     agent_last_read_at: Optional[datetime] = None
 
 
+class GlobalNoteUpdate(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=20000)
+    content: Optional[str] = Field(default=None, max_length=20000)
+
+    @property
+    def text(self) -> str:
+        if self.note is not None:
+            return self.note
+        if self.content is not None:
+            return self.content
+        return ""
+
+
 class ConversationDetail(ConversationResponse):
     messages: list[MessageResponse]
     assignment_history: Optional[List[dict]] = None
+
+    # Persistent Global Note (internal only, for agents and admins)
+    global_note: Optional[str] = None
+    global_note_updated_at: Optional[datetime] = None
+    global_note_updated_by_id: Optional[int] = None
+    global_note_updated_by_name: Optional[str] = None
 
     # Convenience fields mirroring the inbox card, so a single detail fetch can
     # reselect a conversation (e.g. after a refresh or from a notification link).

@@ -129,6 +129,7 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
     if (path === '/admin/articles') return 'Articles';
     if (path === '/admin/faqs') return 'FAQs';
     if (path === '/admin/settings') return 'General Settings';
+    if (path === '/admin/settings/ai-flow') return 'AI Agent Flow & Rules';
     if (path === '/admin/settings/ai') return 'AI Configuration';
     if (path === '/admin/settings/widget') return 'Chat Widget Configuration';
     if (path === '/admin/settings/rules') return 'Assignment Rules';
