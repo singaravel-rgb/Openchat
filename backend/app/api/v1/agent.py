@@ -2,12 +2,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, require_roles
 from app.core.enums import ConversationStatus, MessageSenderType, MessageType
 from app.db.session import get_db
 from app.models.conversation import Conversation
+from app.models.conversation_task import ConversationTask
 from app.models.message import Message
 from app.models.user import User
 from app.schemas.conversation import (
@@ -18,6 +20,11 @@ from app.schemas.conversation import (
     AssignRequest,
     StatusUpdateRequest,
     ConversationUpdate,
+)
+from app.schemas.conversation_task import (
+    ConversationTaskCreate,
+    ConversationTaskResponse,
+    ConversationTaskUpdate,
 )
 from app.services.assignment_service import get_agent_workload, process_pending_queue, set_agent_availability
 from app.services.notification_service import create_notification
@@ -64,30 +71,24 @@ def list_agent_conversations(
     return [build_conversation_list_item(db, c, viewer=current_user) for c in items]
 
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
-def get_agent_conversation(
-    conversation_id: int,
-    limit: int = Query(500, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_agent),
-):
-    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    ensure_can_view(current_user, conversation)
-
+def _conversation_detail(
+    db: Session,
+    conversation: Conversation,
+    limit: int = 500,
+    offset: int = 0,
+    viewer: User | None = None,
+) -> ConversationDetail:
+    """Build the full conversation detail payload (messages + metadata)."""
     messages = (
         db.query(Message)
-        .filter(Message.conversation_id == conversation_id)
+        .filter(Message.conversation_id == conversation.id)
         .order_by(Message.created_at.asc(), Message.id.asc())
-        .offset(offset).limit(limit)
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 
-    mark_conversation_read(db, conversation, "agent")
-    db.commit()
-    db.refresh(conversation)
+    item = build_conversation_list_item(db, conversation, viewer=viewer) if viewer else {}
 
     return ConversationDetail(
         id=conversation.id,
@@ -122,7 +123,33 @@ def get_agent_conversation(
             )
             for m in messages
         ],
+        customer_name=item.get("customer_name"),
+        customer_email=item.get("customer_email"),
+        assigned_agent_name=item.get("assigned_agent_name"),
+        last_message=item.get("last_message"),
+        last_message_at=item.get("last_message_at"),
+        unread_count=item.get("unread_count", 0),
     )
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+def get_agent_conversation(
+    conversation_id: int,
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+
+    mark_conversation_read(db, conversation, "agent")
+    db.commit()
+    db.refresh(conversation)
+
+    return _conversation_detail(db, conversation, limit, offset, viewer=current_user)
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
@@ -368,16 +395,20 @@ async def suggest_agent_reply(
     cfg = get_or_create_ai_config(db)
     runtime = get_runtime_ai_config(db)
 
-    # Build context from recent conversation history
+    # Build context from recent conversation history.
+    # Message.sender_type is stored as a plain string column, so compare values
+    # (never attribute access like ``m.sender_type.name``).
     conversation_context: list[dict[str, str]] = []
     last_customer_message = ""
     for m in messages:
-        if m.sender_type.name == MessageSenderType.CUSTOMER.name or m.sender_type.name == MessageSenderType.AGENT.name:
-            prefix = "Customer: " if m.sender_type.name == MessageSenderType.CUSTOMER.name else "Agent: "
-            conversation_context.append({"role": "user" if m.sender_type.name == MessageSenderType.CUSTOMER.name else "assistant", "content": prefix + (m.content or "")})
-        elif m.sender_type.name == MessageSenderType.AI.name and not m.is_internal:
+        sender = str(m.sender_type)
+        if sender == MessageSenderType.CUSTOMER.value:
+            conversation_context.append({"role": "user", "content": "Customer: " + (m.content or "")})
+        elif sender == MessageSenderType.AGENT.value:
+            conversation_context.append({"role": "assistant", "content": "Agent: " + (m.content or "")})
+        elif sender == MessageSenderType.AI.value and not m.is_internal:
             conversation_context.append({"role": "assistant", "content": f"AI: {m.content or ''}"})
-        if m.sender_type.name == MessageSenderType.CUSTOMER.name and not m.is_internal:
+        if sender == MessageSenderType.CUSTOMER.value and not m.is_internal:
             last_customer_message = m.content or ""
 
     hits = retrieve_knowledge_hits(db, last_customer_message or conversation.subject or "", limit=3) if last_customer_message else []
@@ -399,3 +430,174 @@ async def suggest_agent_reply(
         "usage": usage,
         "sources": [h.to_ref() for h in hits],
     }
+
+
+class AgentCustomerUpdate(BaseModel):
+    """Contact edit for the customer linked to a conversation."""
+
+    full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    # Kept as a plain string: guest customers use the internal reserved
+    # "widget.openchat.local" domain, which EmailStr rejects.
+    email: str | None = Field(default=None, max_length=255)
+
+
+@router.patch("/conversations/{conversation_id}/customer", response_model=ConversationDetail)
+def update_conversation_customer(
+    conversation_id: int,
+    data: AgentCustomerUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    """Edit the contact details (name/email) of the customer on a conversation."""
+    conversation = _get_conversation_or_404(db, conversation_id)
+    ensure_can_modify(current_user, conversation)
+
+    if not conversation.customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    if data.full_name is not None:
+        conversation.customer.full_name = data.full_name
+    if data.email is not None:
+        candidate = data.email.strip()
+        if candidate and "@" not in candidate:
+            raise HTTPException(status_code=422, detail="A valid email address is required")
+        if candidate:
+            existing = (
+                db.query(User)
+                .filter(User.email == candidate, User.id != conversation.customer_id)
+                .first()
+            )
+            if existing:
+                raise HTTPException(status_code=409, detail="Email already in use")
+            conversation.customer.email = candidate
+
+    db.commit()
+    db.refresh(conversation)
+    return _conversation_detail(db, conversation, viewer=current_user)
+
+
+def _get_conversation_or_404(db: Session, conversation_id: int) -> Conversation:
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
+
+
+@router.get("/conversations/{conversation_id}/tasks", response_model=list[ConversationTaskResponse])
+def list_conversation_tasks(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    """List persisted To-do tasks for a conversation."""
+    conversation = _get_conversation_or_404(db, conversation_id)
+    ensure_can_view(current_user, conversation)
+    tasks = (
+        db.query(ConversationTask)
+        .filter(ConversationTask.conversation_id == conversation_id)
+        .order_by(ConversationTask.status.asc(), ConversationTask.created_at.desc())
+        .all()
+    )
+    return [ConversationTaskResponse.model_validate(t) for t in tasks]
+
+
+@router.post(
+    "/conversations/{conversation_id}/tasks",
+    response_model=ConversationTaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_conversation_task(
+    conversation_id: int,
+    data: ConversationTaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    """Create a To-do task on a conversation."""
+    conversation = _get_conversation_or_404(db, conversation_id)
+    ensure_can_modify(current_user, conversation)
+
+    task = ConversationTask(
+        conversation_id=conversation.id,
+        title=data.title,
+        description=data.description,
+        due_at=data.due_at,
+        status="open",
+        created_by_id=current_user.id,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return ConversationTaskResponse.model_validate(task)
+
+
+@router.patch("/conversations/{conversation_id}/tasks/{task_id}", response_model=ConversationTaskResponse)
+def update_conversation_task(
+    conversation_id: int,
+    task_id: int,
+    data: ConversationTaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    """Update a To-do task (edit, complete, reopen, reschedule)."""
+    conversation = _get_conversation_or_404(db, conversation_id)
+    ensure_can_modify(current_user, conversation)
+
+    task = (
+        db.query(ConversationTask)
+        .filter(
+            ConversationTask.id == task_id,
+            ConversationTask.conversation_id == conversation_id,
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    payload = data.model_dump(exclude_unset=True)
+    if "title" in payload and payload["title"] is not None:
+        task.title = payload["title"]
+    if "description" in payload:
+        task.description = payload["description"]
+    if "due_at" in payload:
+        task.due_at = payload["due_at"]
+    if "status" in payload and payload["status"] is not None:
+        new_status = payload["status"]
+        if new_status == "done":
+            task.status = "done"
+            task.completed_at = datetime.now(timezone.utc)
+            task.completed_by_id = current_user.id
+        else:
+            task.status = "open"
+            task.completed_at = None
+            task.completed_by_id = None
+
+    db.commit()
+    db.refresh(task)
+    return ConversationTaskResponse.model_validate(task)
+
+
+@router.delete("/conversations/{conversation_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation_task(
+    conversation_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    """Delete a To-do task."""
+    conversation = _get_conversation_or_404(db, conversation_id)
+    ensure_can_modify(current_user, conversation)
+
+    task = (
+        db.query(ConversationTask)
+        .filter(
+            ConversationTask.id == task_id,
+            ConversationTask.conversation_id == conversation_id,
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    db.delete(task)
+    db.commit()
+    return None

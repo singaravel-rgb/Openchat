@@ -13,7 +13,7 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.auth import UserCreate, UserResponse, Token
+from app.schemas.auth import UserCreate, UserResponse, Token, AgentProfileSummary
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -125,4 +125,9 @@ def login(
 def get_me(
     current_user: User = Depends(get_current_user),
 ):
-    return current_user
+    payload = UserResponse.model_validate(current_user)
+    if current_user.agent_profile is not None:
+        payload.agent_profile = AgentProfileSummary.model_validate(current_user.agent_profile)
+    else:
+        payload.agent_profile = None
+    return payload

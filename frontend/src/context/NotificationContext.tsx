@@ -21,6 +21,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchNotifications = async () => {
+    // Poll silently: before the auth token is hydrated (login/refresh) the API
+    // answers 401, which must not spam the console or clear the badge.
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!token) {
+      setIsLoading(false);
+      return;
+    }
     try {
       setIsLoading(true);
       const [listResult, countResult] = await Promise.all([
@@ -30,7 +37,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setNotifications(listResult.notifications);
       setUnreadCount(countResult.unread_count);
     } catch (error) {
-      console.error('Failed to fetch notifications:', error);
+      // 401 triggers a redirect in the API client; ignore transient failures.
     } finally {
       setIsLoading(false);
     }

@@ -64,6 +64,15 @@ class ConversationDetail(ConversationResponse):
     messages: list[MessageResponse]
     assignment_history: Optional[List[dict]] = None
 
+    # Convenience fields mirroring the inbox card, so a single detail fetch can
+    # reselect a conversation (e.g. after a refresh or from a notification link).
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    assigned_agent_name: Optional[str] = None
+    last_message: Optional[str] = None
+    last_message_at: Optional[datetime] = None
+    unread_count: int = 0
+
 
 class ConversationListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)

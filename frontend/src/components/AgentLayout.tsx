@@ -1,11 +1,13 @@
 'use client';
 
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useEffect, useState, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Sidebar, createNavigation } from '@/components/Sidebar';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
+import { Avatar } from '@/components/Avatar';
 import { NotificationBell } from '@/components/NotificationBell';
+import { agentApi, conversationApi } from '@/lib/api';
 import { useRouter, usePathname } from 'next/navigation';
 import type { User } from '@/lib/types';
 
@@ -19,7 +21,32 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
   const router = useRouter();
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const [globalSearch, setGlobalSearch] = useState('');
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [isAvailable, setIsAvailable] = useState<boolean>(user?.agent_profile?.is_available ?? false);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+
+  useEffect(() => {
+    if (user?.agent_profile?.is_available !== undefined) {
+      setIsAvailable(user.agent_profile.is_available);
+    }
+  }, [user?.agent_profile?.is_available]);
+
+  const handleAvailabilityToggle = async () => {
+    if (user?.role !== 'agent' || availabilityLoading) return;
+    const next = !isAvailable;
+    setAvailabilityLoading(true);
+    setIsAvailable(next);
+    try {
+      await agentApi.setAvailability(next);
+    } catch (err) {
+      setIsAvailable(!next);
+      console.error('Failed to toggle availability:', err);
+    } finally {
+      setAvailabilityLoading(false);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -70,15 +97,32 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
 
   const navigation = createNavigation(user);
 
+  // Workspace routes own the full viewport below the header (no page padding),
+  // so the four-area layout can size itself without a nested scroll container.
+  const isWorkspaceRoute =
+    pathname === '/agent' ||
+    pathname.startsWith('/agent/conversations/') ||
+    /^\/agent\/(pending|assigned|unassigned|resolved)$/.test(pathname) ||
+    pathname === '/admin/conversations' ||
+    pathname.startsWith('/admin/conversations/');
+  const useFullScreen = fullScreen || isWorkspaceRoute;
+
   const getPageTitle = (path: string): string => {
     if (path === '/agent') return 'Inbox';
     if (path === '/agent/pending') return 'Pending';
-    if (path === '/agent/assigned') return 'Assigned';
+    if (path === '/agent/assigned') return 'Assigned to Me';
+    if (path === '/agent/unassigned') return 'Unassigned';
     if (path === '/agent/resolved') return 'Resolved';
+    if (path === '/agent/contacts') return 'Contacts';
+    if (path === '/agent/knowledge') return 'Knowledge Base';
+    if (path === '/agent/canned-responses') return 'Canned Responses';
+    if (path === '/agent/settings') return 'Settings';
+    if (path === '/agent/notifications') return 'Notifications';
     if (path === '/admin') return 'Dashboard';
     if (path === '/admin/reports') return 'Reports';
     if (path === '/admin/sla') return 'SLA Configurations';
     if (path === '/admin/agents') return 'Agents';
+    if (path === '/admin/teams') return 'Teams';
     if (path === '/admin/conversations') return 'All Conversations';
     if (path === '/admin/categories') return 'Categories';
     if (path === '/admin/articles') return 'Articles';
@@ -88,6 +132,10 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
     if (path === '/admin/settings/widget') return 'Chat Widget Configuration';
     if (path === '/admin/settings/rules') return 'Assignment Rules';
     if (path === '/admin/settings/notifications') return 'Notification Settings';
+    if (path === '/admin/canned-responses') return 'Canned Responses';
+    if (path === '/admin/custom-fields') return 'Custom Fields';
+    if (path === '/admin/business-hours') return 'Business Hours';
+    if (path === '/admin/webhooks') return 'Webhooks';
     if (path.startsWith('/agent/conversations/')) return 'Conversation';
     if (path.startsWith('/admin/conversations/')) return 'Conversation';
     return 'OpenChat';
@@ -95,34 +143,104 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <Sidebar user={user} navigation={navigation} />
-      <div className="lg:ml-64" style={{ minHeight: '100vh' }}>
-        {!fullScreen && (
-          <header className="sticky top-0 z-30 bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between px-6 py-3">
-              <div className="flex items-center gap-3">
-                <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-                  {getPageTitle(pathname)}
-                </h1>
-                <div className="hidden sm:block sm:w-64">
-                  <Input
-                    placeholder="Search conversations..."
-                    value={globalSearch}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGlobalSearch(e.target.value)}
-                    className="flex-1 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm placeholder-slate-400 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <NotificationBell />
-                <Button variant="ghost" size="sm" onClick={logout}>
-                  Logout
-                </Button>
+      <Sidebar
+        user={user}
+        navigation={navigation}
+        collapsed={navCollapsed}
+        onToggle={() => setNavCollapsed((value) => !value)}
+      />
+      <div
+        className={`transition-all duration-300 ${navCollapsed ? 'lg:ml-16' : 'lg:ml-64'}`}
+        style={{ minHeight: '100vh' }}
+      >
+        <header className="sticky top-0 z-30 bg-white/90 dark:bg-slate-950/90 backdrop-blur-sm border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between gap-4 px-4 lg:px-6 py-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <h1 className="text-lg lg:text-xl font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                {getPageTitle(pathname)}
+              </h1>
+              <div className="hidden md:block w-64">
+                <Input
+                  placeholder="Global search..."
+                  value={globalSearch}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGlobalSearch(e.target.value)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === 'Enter' && globalSearch.trim()) {
+                      e.preventDefault();
+                      router.push(`/agent?q=${encodeURIComponent(globalSearch.trim())}`);
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
+                  className="flex-1 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm placeholder-slate-400 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
             </div>
-          </header>
-        )}
-        <main className={`${fullScreen ? 'h-[calc(100vh)]' : 'p-6'}`}>
+            <div className="flex items-center gap-2 lg:gap-3">
+              {user?.role === 'agent' && (
+                <button
+                  type="button"
+                  onClick={handleAvailabilityToggle}
+                  disabled={availabilityLoading}
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isAvailable
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700'
+                  } ${availabilityLoading ? 'opacity-60 cursor-wait' : 'hover:brightness-[0.98]'}`}
+                  aria-pressed={isAvailable}
+                  aria-label={isAvailable ? 'Online, click to go offline' : 'Offline, click to go online'}
+                >
+                  <span className={`w-2.5 h-2.5 rounded-full ${isAvailable ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                  <span>{isAvailable ? 'Online' : 'Offline'}</span>
+                </button>
+              )}
+              <NotificationBell />
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setProfileMenuOpen((v) => !v)}
+                  aria-label="Open profile menu"
+                  className="rounded-full"
+                >
+                  <Avatar name={user?.full_name || 'Agent'} size="sm" />
+                </Button>
+                {profileMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setProfileMenuOpen(false)} />
+                    <div className="absolute right-0 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900 z-50">
+                      <div className="px-2 py-2">
+                        <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{user?.full_name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user?.email}</p>
+                      </div>
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          router.push(user?.role === 'admin' ? '/admin/settings' : '/agent');
+                        }}
+                        className="w-full rounded px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        Profile
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          logout();
+                        }}
+                        className="w-full rounded px-2 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className={useFullScreen ? 'h-[calc(100vh-57px)] overflow-hidden' : 'p-6'}>
           {children}
         </main>
       </div>

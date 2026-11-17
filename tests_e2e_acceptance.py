@@ -173,6 +173,13 @@ if customer_token:
     # 3.4 Resolved conversation behavior
     # Find a resolved conversation or create one
     resolved_found = any(c.get("status") in ("resolved", "closed") for c in convs)
+    if not resolved_found and conv_id and agent_token:
+        requests.post(f"{BASE}/api/v1/agent/conversations/{conv_id}/resolve",
+                      json={"resolution_details": "Issue resolved by agent"},
+                      headers=auth_headers(agent_token))
+        resp = requests.get(f"{BASE}/api/v1/conversations", headers=headers)
+        convs = resp.json() if resp.status_code == 200 else []
+        resolved_found = any(c.get("status") in ("resolved", "closed") for c in convs)
     log_test("3.4 Customer can view resolved conversations", resolved_found,
              f"Found resolved conversation" if resolved_found else "No resolved conversations in history")
 
@@ -325,13 +332,17 @@ print("SECTION 5: RELIABILITY VALIDATION")
 print("="*70)
 
 # 5.1 Duplicate message submission (idempotency)
-if customer_token and conv_id:
+if customer_token:
     headers = auth_headers(customer_token)
+    dup_resp = requests.post(f"{BASE}/api/v1/conversations",
+                             json={"subject": "Idempotency Test"},
+                             headers=headers)
+    dup_conv_id = dup_resp.json().get("id") if dup_resp.status_code in (200, 201) else conv_id
     client_id = f"dup_test_{int(time.time())}"
-    resp1 = requests.post(f"{BASE}/api/v1/conversations/{conv_id}/messages",
+    resp1 = requests.post(f"{BASE}/api/v1/conversations/{dup_conv_id}/messages",
                           json={"content": "Duplicate test", "client_message_id": client_id},
                           headers=headers)
-    resp2 = requests.post(f"{BASE}/api/v1/conversations/{conv_id}/messages",
+    resp2 = requests.post(f"{BASE}/api/v1/conversations/{dup_conv_id}/messages",
                           json={"content": "Duplicate test", "client_message_id": client_id},
                           headers=headers)
     # Both should succeed and return the same message (idempotent)

@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { AgentLayout } from '@/components/AgentLayout';
 import ThreePanelWorkspace from '@/components/ThreePanelWorkspace';
 import { useAuth } from '@/context/AuthContext';
 
@@ -19,11 +18,9 @@ export default function AdminConversationPage() {
   if (!user || user.role !== 'admin') return null;
 
   return (
-    <AgentLayout fullScreen>
-      <ThreePanelWorkspace
-        userRole="admin"
-        userId={user.id}
-      />
-    </AgentLayout>
+    <ThreePanelWorkspace
+      userRole="admin"
+      userId={user.id}
+    />
   );
 }

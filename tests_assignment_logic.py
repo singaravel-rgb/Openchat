@@ -86,6 +86,12 @@ log_test("Agent can come back online", agent_available,
 
 # Test 5: FIFO pending queue - create multiple conversations and check order
 print("\n--- Test: FIFO Pending Queue ---")
+# Set all agents offline using admin endpoint
+resp = requests.get(f"{BASE}/api/v1/admin/agents", headers=admin_headers)
+all_agents = resp.json() if resp.status_code == 200 else []
+for a in all_agents:
+    requests.patch(f"{BASE}/api/v1/admin/agents/{a['id']}/availability?is_available=false", headers=admin_headers)
+
 customer_token = login("customer@demo.com", "demo1234")
 customer_headers = auth_headers(customer_token)
 
@@ -95,7 +101,11 @@ for i in range(3):
                          json={"subject": f"FIFO Test {i+1}"},
                          headers=customer_headers)
     if resp.status_code in (200, 201):
-        conv_ids.append(resp.json()["id"])
+        cid = resp.json()["id"]
+        conv_ids.append(cid)
+        requests.post(f"{BASE}/api/v1/conversations/{cid}/messages",
+                      json={"content": "Can I speak to a human agent?"},
+                      headers=customer_headers)
 
 # Wait for AI processing
 time.sleep(3)
@@ -112,6 +122,10 @@ if len(pending) >= 2:
     fifo_order = pending[0].get("created_at", "") <= pending[1].get("created_at", "")
     log_test("FIFO order maintained", fifo_order,
              f"First: {pending[0].get('created_at')}, Second: {pending[1].get('created_at')}")
+
+# Restore agent online status
+for a in all_agents:
+    requests.patch(f"{BASE}/api/v1/admin/agents/{a['id']}/availability?is_available=true", headers=admin_headers)
 
 # Test 6: Reassignment
 print("\n--- Test: Reassignment ---")

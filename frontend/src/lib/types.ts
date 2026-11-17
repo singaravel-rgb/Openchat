@@ -73,6 +73,14 @@ export interface ConversationDetail extends Conversation {
   assignment_history?: Array<Record<string, unknown>>;
   attachments?: Attachment[];
   custom_fields?: ConversationCustomFieldValue[];
+  // Mirrors of the inbox card fields, returned by the detail endpoint so a
+  // conversation can be reselected after refresh or from a notification link.
+  customer_name?: string | null;
+  customer_email?: string | null;
+  assigned_agent_name?: string | null;
+  last_message?: string | null;
+  last_message_at?: string | null;
+  unread_count?: number;
 }
 
 export interface MessageCreate {
@@ -102,6 +110,20 @@ export interface AssignRequest {
 export interface StatusUpdateRequest {
   status?: string;
   resolution_details?: string;
+}
+
+export interface ConversationTask {
+  id: number;
+  conversation_id: number;
+  title: string;
+  description: string | null;
+  status: string;
+  due_at: string | null;
+  created_by_id: number | null;
+  completed_by_id: number | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AgentWorkload {

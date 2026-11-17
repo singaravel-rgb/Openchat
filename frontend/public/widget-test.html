@@ -1,51 +1,31 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenChat Widget Test Page</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
-    h1 { color: #2563eb; }
-    .section { margin: 20px 0; padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; }
-    button { padding: 8px 16px; margin: 4px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
-    button:hover { background: #1d4ed8; }
-    #status { margin-top: 10px; padding: 8px; background: #f8fafc; border-radius: 4px; }
-  </style>
-</head>
-<body>
-  <h1>OpenChat Widget Test</h1>
-  <p>Test the embedded chat widget on this page.</p>
-
-  <div class="section">
-    <h3>Step 1: Open the chat widget</h3>
-    <p>Click the launcher (bottom-right) to start a conversation.</p>
-  </div>
-
-  <div class="section">
-    <h3>Step 2: Send a message</h3>
-    <p>Click "Start new conversation" in the widget, then type a message.</p>
-  </div>
-
-  <div class="section">
-    <h3>Step 3: Request human agent</h3>
-    <p>After the AI responds, click "Request human" to hand off to an agent.</p>
-  </div>
-
-  <div class="section">
-    <h3>Manual verification checklist</h3>
-    <input type="checkbox" id="widget-loaded"> Widget launcher visible<br>
-    <input type="checkbox" id="session-created"> Session created on open<br>
-    <input type="checkbox" id="conversation-started"> Conversation started<br>
-    <input type="checkbox" id="message-sent"> Customer message sent<br>
-    <input type="checkbox" id="ai-responded"> AI responded<br>
-    <input type="checkbox" id="human-requested"> Human handoff requested<br>
-    <input type="checkbox" id="agent-assigned"> Agent assigned (status = assigned)<br>
-    <input type="checkbox" id="agent-replied"> Agent replied<br>
-    <input type="checkbox" id="conversation-resolved"> Conversation resolved<br>
-    <input type="checkbox" id="admin-visible"> Admin can see conversation in dashboard
-  </div>
-
-  <script src="/api/v1/widget/embed.js" async></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenChat Widget Test Host</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 48px; background: #f8fafc; color: #0f172a; }
+      main { max-width: 720px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 32px; }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      p { color: #475569; line-height: 1.6; }
+      code { background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
+      ul { color: #475569; line-height: 1.7; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Acme Support — widget host page</h1>
+      <p>
+        This page only exists to verify the embedded OpenChat widget end to end.
+        The launcher is injected by <code>/api/v1/widget/embed.js</code>.
+      </p>
+      <ul>
+        <li>Open the chat launcher in the bottom-right corner.</li>
+        <li>Send a message and confirm the AI answers.</li>
+        <li>Request a human and confirm the handover message.</li>
+      </ul>
+    </main>
+    <script src="http://localhost:8000/api/v1/widget/embed.js" async></script>
+  </body>
 </html>

@@ -7,8 +7,9 @@ import { Input } from '@/components/Input';
 import { Badge } from '@/components/Badge';
 import { Avatar } from '@/components/Avatar';
 import { format, formatDistanceToNow, isValid, parseISO } from 'date-fns';
-import type { ConversationListItem, Message, CannedResponse, Attachment, ConversationCustomFieldValue } from '@/lib/types';
-import { conversationApi, agentApi, adminApi, cannedResponseApi } from '@/lib/api';
+import type { ConversationListItem, Message, CannedResponse, Attachment, ConversationCustomFieldValue, ConversationTask } from '@/lib/types';
+import { conversationApi,   agentApi,
+  attachmentApi, adminApi, cannedResponseApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 const QUEUE_OPTIONS = [
@@ -115,9 +116,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const params = useParams();
 
   // Layout state
-  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
-  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  const [rightDetailsSection, setRightDetailsSection] = useState<string | null>(null);
+  const [queueFilter, setQueueFilter] = useState<'all' | 'unassigned' | 'pending' | 'ai'>('all');
+  const [showEmojiMenu, setShowEmojiMenu] = useState(false);
+  const [showCannedMenu, setShowCannedMenu] = useState(false);
+  const [showKnowledgeMenu, setShowKnowledgeMenu] = useState(false);
 
   // Data state
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
@@ -141,6 +145,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [cannedSearch, setCannedSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+  const [preselectedId, setPreselectedId] = useState<number | null>(() => {
+    const raw = (params as Record<string, string | string[]> | null)?.id;
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  });
   const [error, setError] = useState<string | null>(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignAgentId, setAssignAgentId] = useState<string>('');
@@ -156,6 +166,25 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'subject'>('newest');
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
+  const [showContactDetails, setShowContactDetails] = useState(false);
+  const [showPropertiesDetails, setShowPropertiesDetails] = useState(false);
+  const [showTimeLogs, setShowTimeLogs] = useState(false);
+  const [showTodo, setShowTodo] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [tasks, setTasks] = useState<ConversationTask[]>([]);
+  const [assignmentHistory, setAssignmentHistory] = useState<Array<Record<string, unknown>>>([]);
+  const [showAllTasks, setShowAllTasks] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDue, setNewTaskDue] = useState('');
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [editingTaskTitle, setEditingTaskTitle] = useState('');
+  const [taskSaving, setTaskSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showContactEdit, setShowContactEdit] = useState(false);
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<HTMLDivElement>(null);
@@ -237,11 +266,41 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       } else {
         detail = await conversationApi.get(id);
       }
-      const conv = conversations.find(c => c.id === id) || null;
-      setSelectedConversation(conv);
+      const existing = conversations.find(c => c.id === id) || null;
+      // A conversation opened from a notification/URL may not be part of the
+      // active queue; build the card from the detail payload (which now carries
+      // the same fields as the inbox list) so it can still be selected.
+      const fromDetail: ConversationListItem = {
+        id: detail.id,
+        customer_id: detail.customer_id,
+        assigned_agent_id: detail.assigned_agent_id ?? null,
+        assigned_agent_name: detail.assigned_agent_name ?? null,
+        subject: detail.subject ?? null,
+        status: detail.status,
+        channel: detail.channel ?? null,
+        priority: detail.priority ?? 'normal',
+        tags: detail.tags ?? [],
+        resolution_details: detail.resolution_details ?? null,
+        created_at: detail.created_at,
+        updated_at: detail.updated_at,
+        resolved_at: detail.resolved_at ?? null,
+        closed_at: detail.closed_at ?? null,
+        customer_last_read_at: detail.customer_last_read_at ?? null,
+        agent_last_read_at: detail.agent_last_read_at ?? null,
+        customer_name: detail.customer_name || existing?.customer_name || 'Unknown Customer',
+        customer_email: detail.customer_email || existing?.customer_email || '',
+        last_message: detail.last_message ?? existing?.last_message ?? null,
+        last_message_at: detail.last_message_at ?? existing?.last_message_at ?? null,
+        unread_count: detail.unread_count ?? existing?.unread_count ?? 0,
+      };
+      if (!existing) {
+        setConversations(prev => [fromDetail, ...prev.filter(c => c.id !== id)]);
+      }
+      setSelectedConversation(existing || fromDetail);
       setMessages(detail.messages || []);
       setAttachments(detail.attachments || []);
       setCustomFields(detail.custom_fields || []);
+      setAssignmentHistory(detail.assignment_history || []);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load conversation';
       setError(errorMessage);
@@ -250,6 +309,171 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setIsLoadingConversation(false);
     }
   }, [userRole, conversations]);
+
+  useEffect(() => {
+    if (!rightDetailsSection) return;
+    if (rightDetailsSection === 'contact') {
+      setShowContactDetails(true);
+      setShowPropertiesDetails(false);
+      setShowTimeLogs(false);
+      setShowTodo(false);
+      setShowTimeline(false);
+    } else if (rightDetailsSection === 'properties') {
+      setShowPropertiesDetails(true);
+      setShowContactDetails(false);
+      setShowTimeLogs(false);
+      setShowTodo(false);
+      setShowTimeline(false);
+    } else if (rightDetailsSection === 'time') {
+      setShowTimeLogs(true);
+      setShowContactDetails(false);
+      setShowPropertiesDetails(false);
+      setShowTodo(false);
+      setShowTimeline(false);
+    } else if (rightDetailsSection === 'todo') {
+      setShowTodo(true);
+      setShowContactDetails(false);
+      setShowPropertiesDetails(false);
+      setShowTimeLogs(false);
+      setShowTimeline(false);
+    } else if (rightDetailsSection === 'timeline') {
+      setShowTimeline(true);
+      setShowContactDetails(false);
+      setShowPropertiesDetails(false);
+      setShowTimeLogs(false);
+      setShowTodo(false);
+    }
+  }, [rightDetailsSection]);
+
+  // Open the conversation referenced by the URL (/agent/conversations/{id}) once.
+  const preselectDone = useRef(false);
+  useEffect(() => {
+    if (preselectDone.current || !preselectedId) return;
+    if (isLoading) return;
+    preselectDone.current = true;
+    loadConversation(preselectedId);
+  }, [preselectedId, isLoading, loadConversation]);
+
+  // Load persisted To-do tasks for the selected conversation
+  const loadTasks = useCallback(async (conversationId: number) => {
+    if (userRole === 'admin') {
+      setTasks([]);
+      return;
+    }
+    try {
+      const data = await agentApi.listTasks(conversationId);
+      setTasks(data);
+    } catch (err) {
+      console.error('[ThreePanelWorkspace] Failed to load tasks:', err);
+      setTasks([]);
+    }
+  }, [userRole]);
+
+  useEffect(() => {
+    if (selectedConversation) {
+      loadTasks(selectedConversation.id);
+    } else {
+      setTasks([]);
+    }
+  }, [selectedConversation, loadTasks]);
+
+  const handleAddTask = useCallback(async () => {
+    const title = newTaskTitle.trim();
+    if (!title || !selectedConversation) return;
+    setTaskSaving(true);
+    try {
+      await agentApi.createTask(selectedConversation.id, {
+        title,
+        due_at: newTaskDue ? new Date(newTaskDue).toISOString() : null,
+      });
+      setNewTaskTitle('');
+      setNewTaskDue('');
+      await loadTasks(selectedConversation.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create task');
+    } finally {
+      setTaskSaving(false);
+    }
+  }, [newTaskTitle, newTaskDue, selectedConversation, loadTasks]);
+
+  const handleToggleTask = useCallback(async (task: ConversationTask) => {
+    if (!selectedConversation) return;
+    const nextStatus = task.status === 'done' ? 'open' : 'done';
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t)));
+    try {
+      await agentApi.updateTask(selectedConversation.id, task.id, { status: nextStatus });
+      await loadTasks(selectedConversation.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update task');
+      await loadTasks(selectedConversation.id);
+    }
+  }, [selectedConversation, loadTasks]);
+
+  const handleSaveTaskTitle = useCallback(async (task: ConversationTask) => {
+    if (!selectedConversation || !editingTaskTitle.trim()) return;
+    try {
+      await agentApi.updateTask(selectedConversation.id, task.id, { title: editingTaskTitle.trim() });
+      setEditingTaskId(null);
+      setEditingTaskTitle('');
+      await loadTasks(selectedConversation.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update task');
+    }
+  }, [selectedConversation, editingTaskTitle, loadTasks]);
+
+  const handleDeleteTask = useCallback(async (task: ConversationTask) => {
+    if (!selectedConversation) return;
+    try {
+      await agentApi.deleteTask(selectedConversation.id, task.id);
+      await loadTasks(selectedConversation.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete task');
+    }
+  }, [selectedConversation, loadTasks]);
+
+  const handleSaveContact = useCallback(async () => {
+    if (!selectedConversation || !contactName.trim()) {
+      setError('Customer name is required');
+      return;
+    }
+    setSavingContact(true);
+    setError(null);
+    try {
+      await agentApi.updateCustomer(selectedConversation.id, {
+        full_name: contactName.trim(),
+        email: contactEmail.trim() || undefined,
+      });
+      setShowContactEdit(false);
+      await loadConversations();
+      if (selectedConversation) {
+        await loadConversation(selectedConversation.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update contact');
+    } finally {
+      setSavingContact(false);
+    }
+  }, [selectedConversation, contactName, contactEmail, loadConversations, loadConversation]);
+
+  const handleAttachmentSelect = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = '';
+      if (!file || !selectedConversation) return;
+
+      setIsUploading(true);
+      try {
+        await attachmentApi.upload(selectedConversation.id, file);
+        const detail = await agentApi.getConversation(selectedConversation.id);
+        setAttachments(detail.attachments || []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to upload attachment');
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [selectedConversation],
+  );
 
   // Load canned responses
   const loadCannedResponses = useCallback(async () => {
@@ -272,8 +496,42 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   useEffect(() => {
     if (selectedConversation) {
       loadConversation(selectedConversation.id);
+    } else {
+      setMessages([]);
+      setAttachments([]);
+      setCustomFields([]);
+      setAssignmentHistory([]);
     }
   }, [selectedConversation, loadConversation]);
+
+  // Light polling keeps new customer/agent messages visible without touching composer state
+  useEffect(() => {
+    if (!selectedConversation || isLoadingConversation) return;
+    const conversationId = selectedConversation.id;
+    const interval = setInterval(async () => {
+      try {
+        const detail =
+          userRole === 'admin'
+            ? await adminApi.getConversation(conversationId)
+            : await agentApi.getConversation(conversationId);
+        setMessages((prev) => {
+          if (
+            prev.length === detail.messages.length &&
+            prev.every((m, i) => m.id === detail.messages[i].id)
+          ) {
+            return prev;
+          }
+          return detail.messages;
+        });
+        setAttachments((prev) =>
+          prev.length === (detail.attachments || []).length ? prev : detail.attachments || [],
+        );
+      } catch {
+        // ignore transient polling failures
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [selectedConversation, isLoadingConversation, userRole]);
 
   // Handle initial conversation from URL
   useEffect(() => {
@@ -303,6 +561,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     setMessages([]);
     setAttachments([]);
     setCustomFields([]);
+    setAssignmentHistory([]);
     // Update URL
     const queuePaths: Record<QueueValue, string> = {
       inbox: '/agent',
@@ -441,6 +700,10 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       const api = userRole === 'admin' ? adminApi : agentApi;
       const result = await api.suggestAgentReply(selectedConversation.id);
       setAiSuggestion(result.draft ?? null);
+      if (result.draft) {
+        setMessageInput(result.draft);
+        setIsInternal(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate AI suggestion');
       setAiSuggestion(null);
@@ -466,11 +729,19 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
 
   const filteredConversations = useMemo(() => {
     const searchQuery = userRole === 'admin' ? adminFilters.q : searchTerm;
-    const filtered = conversations.filter((c) =>
-      (c.subject || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.customer_email || '').toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filtered = conversations.filter((c) => {
+      const matchesSearch =
+        (c.subject || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.customer_email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.last_message || '').toLowerCase().includes(searchQuery.toLowerCase());
+      if (!matchesSearch) return false;
+      if (userRole !== 'agent' || queueFilter === 'all') return true;
+      if (queueFilter === 'unassigned') return !c.assigned_agent_id;
+      if (queueFilter === 'pending') return c.status === 'pending';
+      if (queueFilter === 'ai') return c.status === 'ai_handling';
+      return true;
+    });
     const sorted = [...filtered];
     const timeOf = (c: ConversationListItem) => new Date(c.last_message_at || c.updated_at).getTime();
     sorted.sort((a, b) => {
@@ -483,14 +754,13 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       return timeOf(b) - timeOf(a);
     });
     return sorted;
-  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy]);
+  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy, queueFilter]);
 
   // Layout dimensions
-  const leftWidth = leftPanelCollapsed ? 64 : 360;
-  const rightWidth = rightPanelOpen ? 380 : 0;
+  const rightWidth = rightPanelOpen ? 330 : 56;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950">
+    <div className="flex h-full w-full min-w-0 overflow-hidden bg-slate-50 dark:bg-slate-950">
       {/* Global error banner */}
       {error && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2 flex items-center justify-between animate-slide-down">
@@ -509,40 +779,28 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         </div>
       )}
 
-      {/* Left Panel: Conversation List */}
+      {/* Left Panel: Conversation List (always expanded; no collapse control) */}
       <aside
-        className={`flex flex-col transition-all duration-300 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 overflow-hidden ${
-          leftPanelCollapsed ? 'w-16' : 'w-[360px]'
-        }`}
-        style={{ minWidth: leftPanelCollapsed ? 64 : 360, maxWidth: leftPanelCollapsed ? 64 : 360 }}
+        className="flex w-full min-w-0 shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 lg:w-[380px] lg:min-w-[380px] lg:max-w-[380px]"
         aria-label="Conversation list"
+        data-testid="conversation-list"
       >
         {/* Panel Header */}
-        <div className="flex flex-shrink-0 p-3 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex flex-col flex-shrink-0 p-3 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between w-full min-w-0">
-            {!leftPanelCollapsed && (
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{filteredConversations.length} Conversations</h2>
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{filteredConversations.length} Conversations</h2>
+              {userRole === 'admin' ? (
+                <Badge variant="primary" className="text-xs flex-shrink-0">All</Badge>
+              ) : (
                 <Badge variant={queue === 'inbox' ? 'primary' : queue === 'pending' ? 'warning' : queue === 'assigned' ? 'info' : queue === 'unassigned' ? 'danger' : 'success'} className="text-xs flex-shrink-0">
                   {QUEUE_OPTIONS.find(q => q.value === queue)?.label}
                 </Badge>
-              </div>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
-              aria-label={leftPanelCollapsed ? 'Expand conversation list' : 'Collapse conversation list'}
-              className="flex-shrink-0 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={leftPanelCollapsed ? 'M9 5l7 7-7 7' : 'M15 19l-7-7 7-7'} />
-              </svg>
-            </Button>
+              )}
+            </div>
           </div>
 
-          {!leftPanelCollapsed && (
-            <div className="mt-3 space-y-2">
+          <div className="mt-3 space-y-2">
               {userRole === 'admin' ? (
                 // Admin advanced filters
                 <div className="space-y-2">
@@ -597,16 +855,55 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               ) : (
                 // Agent queue selector and search
                 <>
-                  <select
-                    value={queue}
-                    onChange={(e) => handleQueueChange(e.target.value as QueueValue)}
-                    className="w-full text-sm px-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    aria-label="Select queue"
-                  >
-                    {QUEUE_OPTIONS.map((q) => (
-                      <option key={q.value} value={q.value}>{q.label}</option>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Assigned to me</div>
+                      <select
+                        value={queue}
+                        onChange={(e) => handleQueueChange(e.target.value as QueueValue)}
+                        className="w-full text-sm px-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        aria-label="Select queue"
+                      >
+                        {QUEUE_OPTIONS.map((q) => (
+                          <option key={q.value} value={q.value}>{q.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Sort</div>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                        className="text-sm px-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        aria-label="Sort conversations"
+                      >
+                        <option value="newest">Newest</option>
+                        <option value="oldest">Oldest</option>
+                        <option value="subject">Subject</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {(['all', 'unassigned', 'pending', 'ai'] as const).map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setQueueFilter(opt)}
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
+                          queueFilter === opt
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                        }`}
+                        aria-pressed={queueFilter === opt}
+                      >
+                        {opt === 'ai' ? 'AI' : opt}
+                      </button>
                     ))}
-                  </select>
+                    <div className="ml-auto flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span>Filter</span>
+                      <Badge variant="default" className="text-[10px]">{queueFilter === 'all' ? 'All' : queueFilter === 'ai' ? 'AI' : queueFilter}</Badge>
+                    </div>
+                  </div>
                   <Input
                     placeholder="Search conversations..."
                     value={searchTerm}
@@ -616,26 +913,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   />
                 </>
               )}
-              <div className="flex flex-wrap gap-1 pt-1">
-                {(['newest', 'oldest', 'subject'] as const).map((opt) => (
-                  <button
-                    key={opt}
-                    type="button"
-                    onClick={() => setSortBy(opt)}
-                    className={`rounded border px-2 py-1 text-xs font-medium capitalize transition-colors ${
-                      sortBy === opt
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                    }`}
-                    aria-pressed={sortBy === opt}
-                    aria-label={`Sort by ${opt}`}
-                  >
-                    {opt}
-                  </button>
-                ))}
-              </div>
             </div>
-          )}
         </div>
 
         {/* Conversation List */}
@@ -659,65 +937,72 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
           ) : (
             filteredConversations.map((conv) => {
               const isSelected = selectedConversation?.id === conv.id;
-              const hasUnread = conv.unread_count > 0;
               return (
                 <button
                   key={conv.id}
                   onClick={() => handleSelectConversation(conv)}
-                  className={`w-full px-3 py-3 text-left rounded-lg border transition-all ${
+                  className={`group relative w-full overflow-hidden rounded-xl border px-3 py-3 text-left transition-all ${
                     isSelected
-                      ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 shadow-sm'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 border-transparent'
+                      ? 'border-blue-200 bg-blue-50 shadow-sm dark:border-blue-800 dark:bg-blue-900/30'
+                      : 'border-transparent hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/50'
                   }`}
                   aria-selected={isSelected}
                   aria-label={conv.subject || 'No Subject'}
                 >
+                  {isSelected && (
+                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-600" aria-hidden="true" />
+                  )}
                   <div className="flex items-start gap-3">
                     <Avatar
                       name={conv.customer_name || 'Unknown'}
                       size="md"
                       className="flex-shrink-0 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
                     />
-{!leftPanelCollapsed && (
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <span className={`text-sm font-medium truncate ${isSelected ? 'text-slate-900 dark:text-white' : 'text-slate-700 dark:text-slate-300'}`}>
-                                {conv.subject || 'No Subject'}
+                    <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`truncate text-sm font-semibold ${isSelected ? 'text-slate-900 dark:text-white' : 'text-slate-800 dark:text-slate-100'}`}>
+                                {conv.customer_name || 'Unknown Customer'}
                               </span>
-                              {hasUnread && (
-                                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-medium flex items-center justify-center">
+                              {conv.unread_count > 0 && (
+                                <span className="flex-shrink-0 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                                   {conv.unread_count > 99 ? '99+' : conv.unread_count}
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-1">
-                              <span className="truncate flex-1">{conv.customer_name || 'Unknown Customer'}</span>
-                              {conv.assigned_agent_name && (
-                                <Badge variant="info" className="flex-shrink-0">
-                                  → {conv.assigned_agent_name}
-                                </Badge>
-                              )}
-                              {conv.tags && conv.tags.length > 0 && (
-                                <div className="flex items-center gap-1">
-                                  {conv.tags.map((tag, i) => (
-                                    <Badge key={tag} variant="default" className="text-xs">
-                                      {tag}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
-                              <span className="truncate flex-1">{conv.customer_email || ''}</span>
-                              {formatTimestamp(conv.last_message_at || conv.updated_at)}
-                            </div>
-                            {conv.last_message && (
-                              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
-                                {conv.last_message}
-                              </div>
-                            )}
+                            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                              {conv.subject || 'No Subject'}
+                            </p>
                           </div>
-                        )}
+                          <span className="flex-shrink-0 text-[11px] text-slate-400 dark:text-slate-500">
+                            {formatTimestamp(conv.last_message_at || conv.updated_at)}
+                          </span>
+                        </div>
+                        <p className="line-clamp-2 text-xs text-slate-600 dark:text-slate-300">
+                          {conv.last_message || 'No messages yet'}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <Badge variant={getStatusBadgeVariant(conv.status)} className="text-[10px]">
+                            {conv.status.replace('_', ' ')}
+                          </Badge>
+                          {(conv.priority || 'normal') !== 'normal' && (
+                            <Badge variant={getPriorityBadgeVariant(conv.priority || 'normal')} className="text-[10px]">
+                              {conv.priority}
+                            </Badge>
+                          )}
+                          {conv.channel && (
+                            <Badge variant="default" className="text-[10px] capitalize">
+                              {conv.channel}
+                            </Badge>
+                          )}
+                          {conv.assigned_agent_name && (
+                            <span className="truncate text-[10px] text-slate-500 dark:text-slate-400">
+                              {conv.assigned_agent_name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                   </div>
                 </button>
               );
@@ -755,6 +1040,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     </h2>
                     <div className="flex items-center gap-2 mt-1 text-sm text-slate-500 dark:text-slate-400 flex-wrap">
                       <span className="truncate">{selectedConversation.customer_name || 'Unknown Customer'}</span>
+                      <Badge variant="success" className="text-[10px]">
+                        <svg className="mr-0.5 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Verified
+                      </Badge>
                       <span>•</span>
                       <span className="truncate">{selectedConversation.customer_email || ''}</span>
                       {selectedConversation.channel && (
@@ -808,6 +1099,20 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                         Reopen
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="px-2"
+                      onClick={() => {
+                        setRightPanelOpen((v) => !v);
+                      }}
+                      aria-label={rightPanelOpen ? 'Hide customer details' : 'Show customer details'}
+                      title="Toggle customer details"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a4 4 0 01-4-4V9a4 4 0 014-4h5l3 3v5a4 4 0 01-4 4H9z" />
+                      </svg>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -832,58 +1137,100 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               {!isLoadingConversation &&
                 messages.map((message) => {
                   const info = senderInfo(message);
+                  const isSystemEvent =
+                    message.message_type === 'system_event' || String(message.sender_type) === 'system';
+                  if (isSystemEvent) {
+                    return (
+                      <div key={message.id} className="flex justify-center">
+                        <div className="max-w-[80%] rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-center text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {cleanDemoPrefix(message.content)}{' '}
+                          <span className="text-slate-400 dark:text-slate-500">
+                            {formatFullTimestamp(message.created_at)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
                   const isInternalNote = message.message_type === 'internal_note' || message.is_internal;
+                  const isAiMessage = info.name === 'AI Assistant' || String(message.sender_type) === 'ai';
                   return (
                     <div
                       key={message.id}
-                      className={`flex gap-3 ${info.align === 'right' ? 'flex-row-reverse' : ''} ${isInternalNote ? 'opacity-80' : ''}`}
+                      className={`flex gap-3 ${info.align === 'right' ? 'flex-row-reverse' : ''} ${isInternalNote ? 'opacity-90' : ''}`}
                     >
-                      {info.align === 'left' && !isInternalNote && (
+                      {info.align === 'left' && !isInternalNote && !isAiMessage && (
                         <Avatar name={info.name} size="sm" className={info.color} />
                       )}
+                      {info.align === 'left' && isAiMessage && !isInternalNote && (
+                        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/40">
+                          <svg className="h-4 w-4 text-purple-700 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      )}
                       {info.align === 'left' && isInternalNote && (
-                        <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <svg className="w-4 h-4 text-amber-700 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+                          <svg className="h-4 w-4 text-amber-700 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
                         </div>
                       )}
-                      <div className="flex-1 max-w-[85%]">
+                      <div className="max-w-[85%] flex-1">
                         {info.align !== 'right' && (
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className={`text-sm font-medium ${isInternalNote ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                              {info.name}{isInternalNote ? ' (Internal)' : ''}
+                          <div className="mb-1 flex flex-wrap items-center gap-2">
+                            <span
+                              className={`text-sm font-medium ${
+                                isInternalNote
+                                  ? 'text-amber-700 dark:text-amber-400'
+                                  : isAiMessage
+                                    ? 'text-purple-700 dark:text-purple-300'
+                                    : 'text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              {isInternalNote ? 'Private Note' : isAiMessage ? 'AI Assistant' : info.name}
                             </span>
-                            <time className="text-xs text-slate-500 dark:text-slate-400 ml-auto">
+                            {isInternalNote && (
+                              <Badge variant="warning" className="text-[10px]">
+                                Only visible to agents
+                              </Badge>
+                            )}
+                            {isAiMessage && (
+                              <Badge variant="info" className="text-[10px]">
+                                AI
+                              </Badge>
+                            )}
+                            <time className="ml-auto text-xs text-slate-500 dark:text-slate-400">
                               {formatFullTimestamp(message.created_at)}
                             </time>
                           </div>
                         )}
                         <div
-                          className={`p-3 rounded-lg ${
+                          className={`rounded-lg p-3 ${
                             info.align === 'right'
                               ? 'rounded-tr-none bg-blue-600 text-white shadow-sm'
                               : isInternalNote
-                              ? 'rounded-tl-none bg-amber-50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-100 border border-amber-200 dark:border-amber-800'
-                              : info.name === 'AI Assistant'
-                              ? 'rounded-tl-none bg-purple-50 dark:bg-purple-900/20 text-purple-900 dark:text-purple-100 border border-purple-200 dark:border-purple-800'
-                              : 'rounded-tl-none bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 shadow-sm'
+                                ? 'rounded-tl-none border border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-900/25 dark:text-amber-100'
+                                : isAiMessage
+                                  ? 'rounded-tl-none border border-purple-200 bg-purple-50 text-purple-900 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-100'
+                                  : 'rounded-tl-none border border-slate-200 bg-white text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
                           }`}
                         >
-                          {info.name === 'AI Assistant' && message.content.startsWith('[DEMO AI]') && (
-                            <Badge variant="info" className="text-[10px] ml-1">
+                          {isAiMessage && String(message.content).startsWith('[DEMO AI]') && (
+                            <Badge variant="info" className="mr-1 text-[10px]">
                               Demo
                             </Badge>
                           )}
                           {cleanDemoPrefix(message.content)}
                         </div>
                         {info.align === 'right' && (
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="mt-1 flex items-center gap-2">
                             <time className="text-xs text-blue-200 dark:text-blue-300">
                               {formatFullTimestamp(message.created_at)}
                             </time>
                             {message.is_internal && (
-                              <Badge variant="warning" className="text-xs">Internal</Badge>
+                              <Badge variant="warning" className="text-[10px]">
+                                Internal
+                              </Badge>
                             )}
                           </div>
                         )}
@@ -891,71 +1238,147 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       {info.align === 'right' && (
                         <Avatar name={String(userId)} size="sm" className="bg-blue-600" />
                       )}
-                      {info.align === 'left' && isInternalNote && (
-                        <div className="w-8" />
-                      )}
+                      {info.align === 'left' && (isInternalNote || isAiMessage) && <div className="w-8" />}
                     </div>
                   );
                 })}
               <div ref={messagesEndRef} />
             </div>
-
             {/* Composer */}
             <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0">
-              <div className="flex items-end gap-3">
-                <div className="relative flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isInternal}
-                        onChange={(e) => setIsInternal(e.target.checked)}
-                        className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                      />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                        Private Note
-                      </span>
-                    </label>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setIsInternal(false)}
+                    className={`rounded-md px-3 py-1 text-xs font-medium ${!isInternal ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}
+                  >
+                    Reply
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsInternal(true)}
+                    className={`rounded-md px-3 py-1 text-xs font-medium ${isInternal ? 'bg-amber-100 text-amber-800 shadow-sm dark:bg-amber-900/40 dark:text-amber-200' : 'text-slate-500 dark:text-slate-400'}`}
+                  >
+                    Private Note
+                  </button>
+                </div>
+                {isInternal && (
+                  <Badge variant="warning" className="text-[10px]">Only visible to agents</Badge>
+                )}
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={handleGenerateAiSuggestion} className="rounded p-2 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20" disabled={isGeneratingSuggestion || !selectedConversation}>
+                    {isGeneratingSuggestion ? 'Generating...' : 'AI'}
+                  </button>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      className="hidden"
+                      onChange={handleAttachmentSelect}
+                      aria-label="Upload attachment"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isUploading}
+                      className="rounded p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800"
+                      aria-label={isUploading ? 'Uploading attachment' : 'Attach file'}
+                      title="Attach file"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                    </button>
                   </div>
-                  <textarea
-                    value={messageInput}
-                    onChange={(e) => {
-                      setMessageInput(e.target.value);
-                      setCannedSearch(e.target.value);
-                    }}
-                    placeholder={isInternal ? "Type an internal note (only visible to agents)..." : "Type a message..."}
-                    rows={2}
-                    className="w-full px-4 py-2.5 text-sm border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    disabled={isSending}
-                  />
-                  {(cannedSearch || isInternal) && cannedResponses.length > 0 && (
-                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg max-h-60 overflow-y-auto z-10">
-                      {cannedResponses
-                        .filter((c) => c.title.toLowerCase().includes(cannedSearch.toLowerCase()))
-                        .slice(0, 5)
-                        .map((c) => (
-                          <div
+                  <div className="relative">
+                    <button type="button" onClick={() => setShowCannedMenu((v) => !v)} className="rounded p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800" aria-label="Insert canned response" title="Canned responses">
+                      <span className="text-xs font-medium">CR</span>
+                    </button>
+                    {showCannedMenu && (
+                      <div className="absolute bottom-full right-0 z-20 mb-1 w-64 rounded border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                        {cannedResponses.slice(0, 6).map((c) => (
+                          <button
                             key={c.id}
-                            onClick={() => setMessageInput((prev) => prev + c.content)}
-                            className="px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 cursor-pointer border-t border-slate-100 dark:border-slate-800/50 first:border-t-0"
+                            type="button"
+                            onClick={() => {
+                              setMessageInput((prev) => prev + c.content);
+                              setShowCannedMenu(false);
+                            }}
+                            className="w-full truncate rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
                           >
-                            <span className="font-medium">{c.title}</span>
-                            <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">{c.category}</span>
-                          </div>
+                            {c.title}
+                          </button>
                         ))}
-                    </div>
-                  )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <button type="button" onClick={() => setShowKnowledgeMenu((v) => !v)} className="rounded p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800" aria-label="Knowledge base">
+                      <span className="text-xs font-medium">KB</span>
+                    </button>
+                    {showKnowledgeMenu && (
+                      <div className="absolute bottom-full right-0 z-20 mb-1 w-56 rounded border border-slate-200 bg-white p-2 text-xs text-slate-500 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+                        Use KB through AI suggestion or open `/help` to search published articles.
+                      </div>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <button type="button" onClick={() => setShowEmojiMenu((v) => !v)} className="rounded p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800" aria-label="Insert emoji">
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </button>
+                    {showEmojiMenu && (
+                      <div className="absolute bottom-full right-0 z-20 mb-1 grid w-28 grid-cols-4 gap-1 rounded border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                        {['😊', '👍', '🙏', '🎉', '👀', '✅', '⚠️', '📎'].map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => {
+                              setMessageInput((prev) => prev + emoji);
+                              setShowEmojiMenu(false);
+                            }}
+                            className="rounded p-1 text-base hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <div className="relative">
+                    <textarea
+                      value={messageInput}
+                      onChange={(e) => {
+                        setMessageInput(e.target.value);
+                        setCannedSearch(e.target.value);
+                      }}
+                      placeholder={isInternal ? 'Write a private note (only agents can see this)...' : 'Type a message...'}
+                      rows={2}
+                      className={`w-full px-4 py-2.5 text-sm border rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
+                        isInternal
+                          ? 'border-amber-300 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100'
+                          : 'border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                      }`}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      disabled={isSending}
+                    />
+                  </div>
                 </div>
                 <Button
                   onClick={handleSendMessage}
                   disabled={isSending || !messageInput.trim()}
-                  className="px-6 py-2.5 h-10 flex-shrink-0"
+                  className={`px-6 py-2.5 h-10 flex-shrink-0 ${isInternal ? 'bg-amber-600 hover:bg-amber-700' : ''}`}
                 >
                   {isSending ? 'Sending...' : isInternal ? 'Add Note' : 'Send'}
                 </Button>
@@ -982,164 +1405,648 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
 
       {/* Right Panel: Conversation Details */}
       <aside
-        className={`flex flex-col transition-all duration-300 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 overflow-hidden xl:flex ${rightPanelOpen ? '' : 'hidden xl:flex'}`}
-        style={{ width: rightPanelOpen ? 380 : 0, minWidth: rightPanelOpen ? 380 : 0, maxWidth: rightPanelOpen ? 380 : 0 }}
+        className="flex flex-col transition-all duration-300 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 overflow-hidden"
+        style={{ width: rightPanelOpen ? 330 : 56, minWidth: rightPanelOpen ? 330 : 56, maxWidth: rightPanelOpen ? 330 : 56 }}
         aria-label="Conversation details"
       >
-        <div className="flex flex-col h-full">
-          {/* Panel Header */}
-          <div className="p-3 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Details</h2>
+        {!rightPanelOpen ? (
+          <div className="flex h-full flex-col items-center gap-2 py-3">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setRightPanelOpen(false)}
-              aria-label="Close details panel"
-              className="xl:hidden text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              onClick={() => {
+                setRightPanelOpen(true);
+                setRightDetailsSection(null);
+              }}
+              aria-label="Expand customer details"
+              className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={rightPanelOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
               </svg>
             </Button>
+            <div className="mt-2 flex flex-col items-center gap-3 text-slate-500 dark:text-slate-400">
+              <button
+                type="button"
+                title="Contact information"
+                onClick={() => {
+                  setRightPanelOpen(true);
+                  setRightDetailsSection('contact');
+                }}
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Conversation properties"
+                onClick={() => {
+                  setRightPanelOpen(true);
+                  setRightDetailsSection('properties');
+                }}
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Time logs"
+                onClick={() => {
+                  setRightPanelOpen(true);
+                  setRightDetailsSection('time');
+                }}
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="To-do"
+                onClick={() => {
+                  setRightPanelOpen(true);
+                  setRightDetailsSection('todo');
+                }}
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Recent timeline"
+                onClick={() => {
+                  setRightPanelOpen(true);
+                  setRightDetailsSection('timeline');
+                }}
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+            </div>
           </div>
+        ) : (
+          <div className="flex flex-col h-full">
+            {/* Panel Header */}
+            <div className="p-3 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Customer Details</h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setRightPanelOpen(false)}
+                aria-label="Collapse details panel"
+                className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={rightPanelOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
+                </svg>
+              </Button>
+            </div>
 
           {/* Panel Content */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3" style={{ minHeight: 0 }}>
+            {!selectedConversation && (
+              <div className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                Select a conversation to see customer details, tasks and timeline.
+              </div>
+            )}
             {selectedConversation && (
               <>
-                {/* Customer Info */}
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Customer</p>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-3">
-                      <Avatar name={selectedConversation.customer_name || 'Unknown'} size="md" className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-900 dark:text-white truncate">
-                          {selectedConversation.customer_name || 'Unknown Customer'}
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                          {selectedConversation.customer_email || ''}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Conversation Properties */}
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Conversation</p>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600 dark:text-slate-400">Status</span>
-                      <Badge variant={getStatusBadgeVariant(selectedConversation.status)}>
-                        {selectedConversation.status.replace('_', ' ')}
-                      </Badge>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600 dark:text-slate-400">Priority</span>
-                      <Badge variant={getPriorityBadgeVariant(selectedConversation.priority || 'normal')}>
-                        {selectedConversation.priority || 'normal'}
-                      </Badge>
-                    </div>
-                    {selectedConversation.assigned_agent_name && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-600 dark:text-slate-400">Assigned Agent</span>
-                        <span className="text-slate-900 dark:text-slate-100 font-medium">{selectedConversation.assigned_agent_name}</span>
-                      </div>
-                    )}
-                    {selectedConversation.channel && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-600 dark:text-slate-400">Channel</span>
-                        <Badge variant="info" className="capitalize">{selectedConversation.channel}</Badge>
-                      </div>
-                    )}
-                    {selectedConversation.tags && selectedConversation.tags.length > 0 ? (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-600 dark:text-slate-400">Tags</span>
-                        <div className="flex flex-wrap gap-1">
-                          {selectedConversation.tags.map((tag) => (
-                            <Badge key={tag} variant="default" className="text-xs flex items-center gap-1">
-                              {tag}
-                              <button
-                                type="button"
-                                onClick={() => handleTagRemove(tag)}
-                                className="hover:text-red-500"
-                                aria-label={`Remove tag ${tag}`}
-                              >
-                                ✕
-                              </button>
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-600 dark:text-slate-400">Tags</span>
-                        <Button variant="ghost" size="sm" onClick={() => setShowTagModal(true)} className="text-xs text-blue-600 dark:text-blue-400">
-                          + Add
-                        </Button>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600 dark:text-slate-400">Created</span>
-                      <span className="text-slate-900 dark:text-slate-100 font-medium">
-                        {formatFullTimestamp(selectedConversation.created_at)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600 dark:text-slate-400">Updated</span>
-                      <span className="text-slate-900 dark:text-slate-100 font-medium">
-                        {formatFullTimestamp(selectedConversation.updated_at)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Custom Fields */}
-                {customFields.length > 0 && (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Custom Fields</p>
-                    <div className="space-y-2">
-                      {customFields.map((cf) => (
-                        <div key={cf.custom_field_id} className="flex justify-between text-sm">
-                          <span className="text-slate-600 dark:text-slate-400">{cf.field_name}</span>
-                          <span className="text-slate-900 dark:text-slate-100 font-medium">{cf.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Attachments */}
-                {attachments.length > 0 && (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Attachments</p>
-                    <div className="space-y-2">
-                      {attachments.map((att) => (
-                        <div key={att.id} className="flex items-center gap-2 p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
-                          <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                          </svg>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{att.filename}</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">
-                              {(att.file_size / 1024).toFixed(1)} KB • {att.mime_type}
-                            </p>
+                 <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                   <button
+                     type="button"
+                     className="flex w-full items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                     onClick={() => setShowContactDetails((v) => !v)}
+                   >
+                     <span>Contact Information</span>
+                     <svg className={`h-4 w-4 transition-transform ${showContactDetails ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                     </svg>
+                   </button>
+                   <div className="mt-3 space-y-2">
+                     <div className="flex items-center gap-3">
+                       <Avatar name={selectedConversation.customer_name || 'Unknown'} size="md" className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300" />
+                       <div className="min-w-0 flex-1">
+                         <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                           {selectedConversation.customer_name || 'Unknown Customer'}
+                         </p>
+                         <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                           {selectedConversation.customer_email || ''}
+                         </p>
+                       </div>
+                     </div>
+                     {showContactDetails && (
+                       <div className="space-y-1.5 border-t border-slate-200 pt-2 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                         <div className="flex items-center justify-between gap-2">
+                           <span className="text-slate-500 dark:text-slate-400">Customer ID</span>
+                           <span className="font-medium text-slate-900 dark:text-slate-100">{selectedConversation.customer_id}</span>
+                         </div>
+                         <div className="flex items-center justify-between gap-2">
+                           <span className="text-slate-500 dark:text-slate-400">Channel</span>
+                           <Badge variant="info" className="capitalize">{selectedConversation.channel || 'website'}</Badge>
+                         </div>
+                         <div className="flex items-center justify-between gap-2">
+                           <span className="text-slate-500 dark:text-slate-400">Conversations</span>
+                           <span className="font-medium text-slate-900 dark:text-slate-100">{conversations.filter((c) => c.customer_id === selectedConversation.customer_id).length}</span>
+                         </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-500 dark:text-slate-400">Current status</span>
+                            <Badge variant={getStatusBadgeVariant(selectedConversation.status)}>{selectedConversation.status.replace('_', ' ')}</Badge>
                           </div>
+                          {userRole !== 'admin' && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => {
+                                  setContactName(selectedConversation.customer_name || '');
+                                  setContactEmail(selectedConversation.customer_email || '');
+                                  setShowContactEdit(true);
+                                }}
+                              >
+                                Edit contact
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => {
+                                  router.push('/agent/contacts');
+                                }}
+                              >
+                                All contacts
+                              </Button>
+                            </div>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                      )}
+                   </div>
+                 </div>
 
-                {/* Assignment History - would need backend support */}
-              </>
-            )}
-          </div>
-        </div>
-      </aside>
+                 {/* Time Logs */}
+                 <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                   <button
+                     type="button"
+                     className="w-full text-left flex items-center justify-between gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider"
+                     onClick={() => setShowTimeLogs((v) => !v)}
+                   >
+                     <span>Time Logs</span>
+                     <svg className={`w-4 h-4 transition-transform ${showTimeLogs ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                     </svg>
+                   </button>
+                   {showTimeLogs && (
+                     <div className="mt-2 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+                       <div className="flex items-center justify-between gap-2">
+                         <span>Created</span>
+                         <span>{formatFullTimestamp(selectedConversation.created_at)}</span>
+                       </div>
+                       <div className="flex items-center justify-between gap-2">
+                         <span>Messages</span>
+                         <span>{messages.length}</span>
+                       </div>
+                       <div className="flex items-center justify-between gap-2">
+                         <span>Last updated</span>
+                         <span>{formatFullTimestamp(selectedConversation.updated_at)}</span>
+                       </div>
+                     </div>
+                   )}
+                 </div>
+
+                 {/* To-do */}
+                 <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                   <button
+                     type="button"
+                     className="flex w-full items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                     onClick={() => setShowTodo((v) => !v)}
+                   >
+                     <span className="flex items-center gap-2">
+                       To-do
+                       {tasks.filter((t) => t.status !== 'done').length > 0 && (
+                         <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                           {tasks.filter((t) => t.status !== 'done').length}
+                         </span>
+                       )}
+                     </span>
+                     <svg className={`w-4 h-4 transition-transform ${showTodo ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                     </svg>
+                   </button>
+
+                   {showTodo && (
+                     <div className="mt-2 space-y-2">
+                       {userRole !== 'admin' && (
+                         <div className="space-y-1.5">
+                           <Input
+                             value={newTaskTitle}
+                             onChange={(e) => setNewTaskTitle(e.target.value)}
+                             onKeyDown={(e) => {
+                               if (e.key === 'Enter') {
+                                 e.preventDefault();
+                                 handleAddTask();
+                               }
+                             }}
+                             placeholder="Add a task..."
+                             className="w-full px-2 py-1.5 text-xs"
+                             aria-label="New task title"
+                           />
+                           <div className="flex items-center gap-1.5">
+                             <input
+                               type="datetime-local"
+                               value={newTaskDue}
+                               onChange={(e) => setNewTaskDue(e.target.value)}
+                               className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                               aria-label="Task due date"
+                             />
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               onClick={handleAddTask}
+                               disabled={taskSaving || !newTaskTitle.trim() || !selectedConversation}
+                               className="h-7 px-2 text-xs"
+                             >
+                               Add
+                             </Button>
+                           </div>
+                         </div>
+                       )}
+
+                       {tasks.length === 0 ? (
+                         <p className="text-[11px] text-slate-500 dark:text-slate-400">No tasks yet.</p>
+                       ) : (
+                         <ul className="space-y-1.5">
+                           {(showAllTasks ? tasks : tasks.slice(0, 5)).map((task) => (
+                             <li
+                               key={task.id}
+                               className="rounded border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900"
+                             >
+                               <div className="flex items-start gap-2">
+                                 <button
+                                   type="button"
+                                   onClick={() => handleToggleTask(task)}
+                                   className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${
+                                     task.status === 'done'
+                                       ? 'border-emerald-600 bg-emerald-600 text-white'
+                                       : 'border-slate-300 dark:border-slate-600'
+                                   }`}
+                                   aria-label={task.status === 'done' ? 'Mark task incomplete' : 'Complete task'}
+                                 >
+                                   {task.status === 'done' && (
+                                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                     </svg>
+                                   )}
+                                 </button>
+                                 <div className="min-w-0 flex-1">
+                                   {editingTaskId === task.id ? (
+                                     <div className="flex items-center gap-1">
+                                       <Input
+                                         value={editingTaskTitle}
+                                         onChange={(e) => setEditingTaskTitle(e.target.value)}
+                                         className="h-6 w-full px-1.5 py-0.5 text-[11px]"
+                                         onKeyDown={(e) => {
+                                           if (e.key === 'Enter') {
+                                             e.preventDefault();
+                                             handleSaveTaskTitle(task);
+                                           }
+                                           if (e.key === 'Escape') {
+                                             setEditingTaskId(null);
+                                             setEditingTaskTitle('');
+                                           }
+                                         }}
+                                         autoFocus
+                                       />
+                                       <Button
+                                         variant="ghost"
+                                         size="sm"
+                                         onClick={() => handleSaveTaskTitle(task)}
+                                         className="h-6 px-1.5 text-[11px]"
+                                       >
+                                         Save
+                                       </Button>
+                                     </div>
+                                   ) : (
+                                     <button
+                                       type="button"
+                                       onClick={() => {
+                                         if (userRole === 'admin') return;
+                                         setEditingTaskId(task.id);
+                                         setEditingTaskTitle(task.title);
+                                       }}
+                                       className={`block w-full text-left text-[11px] ${
+                                         task.status === 'done'
+                                           ? 'text-slate-400 line-through dark:text-slate-500'
+                                           : 'text-slate-700 dark:text-slate-200'
+                                       }`}
+                                     >
+                                       {task.title}
+                                     </button>
+                                   )}
+                                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+                                     <span className="capitalize">{task.status}</span>
+                                     {task.due_at && (
+                                       <span>Due {formatFullTimestamp(task.due_at)}</span>
+                                     )}
+                                   </div>
+                                 </div>
+                                 {userRole !== 'admin' && (
+                                   <button
+                                     type="button"
+                                     onClick={() => handleDeleteTask(task)}
+                                     className="flex-shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                                     aria-label="Delete task"
+                                   >
+                                     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                                     </svg>
+                                   </button>
+                                 )}
+                               </div>
+                             </li>
+                           ))}
+                         </ul>
+                       )}
+
+                       {tasks.length > 5 && (
+                         <button
+                           type="button"
+                           onClick={() => setShowAllTasks((v) => !v)}
+                           className="text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
+                         >
+                           {showAllTasks ? 'Show fewer' : `View all ${tasks.length} tasks`}
+                         </button>
+                       )}
+                     </div>
+                   )}
+                 </div>
+
+
+                 {/* Conversation Properties */}
+                 <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                   <button
+                     type="button"
+                     className="flex w-full items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                     onClick={() => setShowPropertiesDetails((v) => !v)}
+                   >
+                     <span>Customer Properties</span>
+                     <svg className={`h-4 w-4 transition-transform ${showPropertiesDetails ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                     </svg>
+                   </button>
+                   {showPropertiesDetails && (
+                     <div className="mt-2 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+                       <div className="flex items-center justify-between gap-2">
+                         <span className="text-slate-500 dark:text-slate-400">Status</span>
+                         <Badge variant={getStatusBadgeVariant(selectedConversation.status)}>
+                           {selectedConversation.status.replace('_', ' ')}
+                         </Badge>
+                       </div>
+                       <div className="flex items-center justify-between gap-2">
+                         <span className="text-slate-500 dark:text-slate-400">Priority</span>
+                         <Badge variant={getPriorityBadgeVariant(selectedConversation.priority || 'normal')}>
+                           {selectedConversation.priority || 'normal'}
+                         </Badge>
+                       </div>
+                       <div className="flex items-center justify-between gap-2">
+                         <span className="text-slate-500 dark:text-slate-400">Assigned agent</span>
+                         <span className="truncate font-medium text-slate-900 dark:text-slate-100">
+                           {selectedConversation.assigned_agent_name || 'Unassigned'}
+                         </span>
+                       </div>
+                       <div className="flex items-center justify-between gap-2">
+                         <span className="text-slate-500 dark:text-slate-400">Channel</span>
+                         <span className="font-medium capitalize text-slate-900 dark:text-slate-100">
+                           {selectedConversation.channel || 'website'}
+                         </span>
+                       </div>
+                       {selectedConversation.tags && selectedConversation.tags.length > 0 && (
+                         <div className="flex items-start justify-between gap-2">
+                           <span className="text-slate-500 dark:text-slate-400">Tags</span>
+                           <div className="flex flex-wrap justify-end gap-1">
+                             {selectedConversation.tags.map((tag) => (
+                               <button
+                                 key={tag}
+                                 type="button"
+                                 onClick={() => handleTagRemove(tag)}
+                                 title={`Remove tag ${tag}`}
+                                 className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-red-100 hover:text-red-700 dark:bg-blue-900/40 dark:text-blue-300"
+                               >
+                                 {tag}
+                               </button>
+                             ))}
+                           </div>
+                         </div>
+                       )}
+                     </div>
+                   )}
+                 </div>
+
+                 {/* Recent Timeline */}
+                 <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                   <button
+                     type="button"
+                     className="flex w-full items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                     onClick={() => setShowTimeline((v) => !v)}
+                   >
+                     <span>Recent Timeline</span>
+                     <svg className={`h-4 w-4 transition-transform ${showTimeline ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                     </svg>
+                   </button>
+                   {showTimeline && (
+                     <div className="mt-2 space-y-1.5 text-xs">
+                       <div className="flex items-start gap-2 text-slate-500 dark:text-slate-400">
+                         <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-blue-500" />
+                         <div className="min-w-0">
+                           <p>Conversation created</p>
+                           <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                             {formatFullTimestamp(selectedConversation.created_at)}
+                           </p>
+                         </div>
+                       </div>
+                       {(assignmentHistory || []).slice(-5).map((entry, index) => (
+                         <div key={`assignment-${index}`} className="flex items-start gap-2 text-slate-500 dark:text-slate-400">
+                           <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-500" />
+                           <div className="min-w-0">
+                             <p>Assigned to {String((entry as Record<string, unknown>).agent_name ?? (entry as Record<string, unknown>).agent_id ?? 'agent')}</p>
+                             <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                               {formatFullTimestamp(
+                                 (entry as Record<string, unknown>).assigned_at as string | undefined,
+                               )}
+                             </p>
+                           </div>
+                         </div>
+                       ))}
+                       {messages
+                         .filter((m) => m.message_type === 'system_event' || m.sender_type === 'system')
+                         .slice(-5)
+                         .map((event) => (
+                           <div key={`event-${event.id}`} className="flex items-start gap-2 text-slate-500 dark:text-slate-400">
+                             <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-orange-500" />
+                             <div className="min-w-0">
+                               <p className="break-words">{cleanDemoPrefix(event.content)}</p>
+                               <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                                 {formatFullTimestamp(event.created_at)}
+                               </p>
+                             </div>
+                           </div>
+                         ))}
+                       {conversations.filter(
+                         (c) => c.customer_id === selectedConversation.customer_id && c.id !== selectedConversation.id,
+                       ).length > 0 && (
+                         <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+                           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                             Previous conversations
+                           </p>
+                           {conversations
+                             .filter(
+                               (c) => c.customer_id === selectedConversation.customer_id && c.id !== selectedConversation.id,
+                             )
+                             .slice(0, 5)
+                             .map((prev) => (
+                               <button
+                                 key={prev.id}
+                                 type="button"
+                                 onClick={() => handleSelectConversation(prev)}
+                                 className="flex w-full items-center justify-between gap-2 rounded px-1 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
+                               >
+                                 <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300">
+                                   #{prev.id} {prev.subject || 'No Subject'}
+                                 </span>
+                                 <span className="flex-shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                                   {formatTimestamp(prev.last_message_at || prev.updated_at)}
+                                 </span>
+                               </button>
+                             ))}
+                         </div>
+                       )}
+                       {selectedConversation.resolved_at && (
+                         <div className="flex items-start gap-2 text-emerald-600 dark:text-emerald-400">
+                           <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500" />
+                           <div className="min-w-0">
+                             <p>Conversation resolved</p>
+                             <p className="text-[10px] opacity-80">
+                               {formatFullTimestamp(selectedConversation.resolved_at)}
+                             </p>
+                           </div>
+                         </div>
+                       )}
+                       {selectedConversation.closed_at && (
+                         <div className="flex items-start gap-2 text-slate-500 dark:text-slate-400">
+                           <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-slate-400" />
+                           <div className="min-w-0">
+                             <p>Conversation closed</p>
+                             <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                               {formatFullTimestamp(selectedConversation.closed_at)}
+                             </p>
+                           </div>
+                         </div>
+                       )}
+                     </div>
+                   )}
+                 </div>
+
+                 {/* Custom Fields */}
+                 {customFields.length > 0 && (
+                   <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                     <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Custom Fields</p>
+                     <div className="space-y-2">
+                       {customFields.map((cf) => (
+                         <div key={cf.custom_field_id} className="flex justify-between text-sm">
+                           <span className="text-slate-600 dark:text-slate-400">{cf.field_name}</span>
+                           <span className="text-slate-900 dark:text-slate-100 font-medium">{cf.value}</span>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                 )}
+
+                 {/* Attachments */}
+                 {attachments.length > 0 && (
+                   <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                     <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Attachments</p>
+                     <div className="space-y-2">
+                       {attachments.map((att) => (
+                         <div key={att.id} className="flex items-center gap-2 p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+                           <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                           </svg>
+                           <div className="flex-1 min-w-0">
+                             <p className="text-sm font-medium text-slate-900 dark:text-white truncate">{att.filename}</p>
+                             <p className="text-xs text-slate-500 dark:text-slate-400">
+                               {(att.file_size / 1024).toFixed(1)} KB • {att.mime_type}
+                             </p>
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                  )}
+
+                 {/* Assignment History - would need backend support */}
+               </>
+             )}
+           </div>
+         </div>
+        )}
+       </aside>
 
       {/* Modals */}
+      {showContactEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-xl dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Edit Contact</h2>
+              <Button variant="ghost" size="sm" onClick={() => setShowContactEdit(false)} aria-label="Close">
+                ✕
+              </Button>
+            </div>
+            <div className="space-y-4 p-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300" htmlFor="contact-name">
+                  Customer name
+                </label>
+                <Input
+                  id="contact-name"
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                  placeholder="Customer name"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300" htmlFor="contact-email">
+                  Email
+                </label>
+                <Input
+                  id="contact-email"
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  placeholder="customer@example.com"
+                />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+                <Button variant="secondary" onClick={() => setShowContactEdit(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveContact} disabled={savingContact || !contactName.trim()}>
+                  {savingContact ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAssignModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-md w-full">

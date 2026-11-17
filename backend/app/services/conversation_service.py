@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_, distinct
@@ -453,17 +453,47 @@ async def process_customer_message(
     if conversation.status == ConversationStatus.AI_HANDLING:
         try:
             from app.services.ai_service import process_ai_turn
-            result = await process_ai_turn(db, conversation, [], customer)
-            if result and result.answer:
-                ai_msg = Message(
-                    conversation_id=conversation.id,
-                    sender_id=None,
-                    sender_type=MessageSenderType.AI,
-                    message_type=MessageType.TEXT,
-                    content=result.answer,
-                    is_internal=False,
-                )
-                db.add(ai_msg)
+            from app.services.assignment_service import assign_conversation_to_agent
+
+            history_messages = (
+                db.query(Message)
+                .filter(Message.conversation_id == conversation.id)
+                .order_by(Message.created_at.asc(), Message.id.asc())
+                .all()
+            )
+            result = await process_ai_turn(db, conversation, history_messages, customer)
+            if result:
+                ai_metadata = {
+                    "provider": result.provider,
+                    "model": result.model,
+                    "latency_ms": result.latency_ms,
+                    "decision": result.decision,
+                    "confidence": result.confidence,
+                    "sources": result.sources or [],
+                    "knowledge": result.sources or [],
+                    "escalated": result.should_escalate,
+                    "escalation_reason": result.escalation_reason,
+                }
+                if result.answer:
+                    ai_msg = Message(
+                        conversation_id=conversation.id,
+                        sender_id=None,
+                        sender_type=MessageSenderType.AI,
+                        message_type=MessageType.TEXT,
+                        content=result.answer,
+                        is_internal=False,
+                        ai_metadata=ai_metadata,
+                    )
+                    db.add(ai_msg)
+
+                if result.should_escalate:
+                    conversation.status = ConversationStatus.PENDING
+                    record_system_event(
+                        db,
+                        conversation,
+                        "Customer requested human assistance" if result.decision == "handoff_requested" else f"AI escalated to human support: {result.escalation_reason or 'assistance needed'}"
+                    )
+                    assign_conversation_to_agent(db, conversation)
         except Exception:
             # Log error but don't fail the customer message
             import logging

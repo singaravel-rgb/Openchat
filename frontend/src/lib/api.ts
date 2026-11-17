@@ -1,4 +1,4 @@
-import type { Token, User, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, AdminStats, AdminAgent, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch } from './types';
+import type { Token, User, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -17,10 +17,22 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${API_BASE}/api/v1${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/v1${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (err) {
+    // Browsers report network/CORS/preflight failures as a bare TypeError.
+    throw new Error(
+      `Cannot reach the OpenChat API at ${API_BASE}. Check that the backend is running and that this origin is allowed in CORS settings.`,
+    );
+  }
+
+  if (response.status === 429) {
+    throw new Error('Too many requests. Please wait a minute and try again.');
+  }
 
   if (!response.ok) {
     if (response.status === 401) {
@@ -138,12 +150,40 @@ export const agentApi = {
 
   getWorkload: () => fetchApi<AgentWorkload>('/agent/workload'),
 
+  updateCustomer: (conversationId: number, data: { full_name?: string; email?: string }) =>
+    fetchApi<ConversationDetail>(`/agent/conversations/${conversationId}/customer`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
   setAvailability: (isAvailable: boolean) =>
     fetchApi<{ message: string }>(`/agent/availability?is_available=${isAvailable}`, {
       method: 'PATCH',
     }),
 
   listAgents: () => fetchApi<Array<{ id: number; full_name: string; email: string }>>('/agent/agents'),
+
+  listTasks: (conversationId: number) =>
+    fetchApi<ConversationTask[]>(`/agent/conversations/${conversationId}/tasks`),
+
+  createTask: (conversationId: number, data: { title: string; description?: string; due_at?: string | null }) =>
+    fetchApi<ConversationTask>(`/agent/conversations/${conversationId}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateTask: (
+    conversationId: number,
+    taskId: number,
+    data: { title?: string; description?: string | null; status?: 'open' | 'done'; due_at?: string | null },
+  ) =>
+    fetchApi<ConversationTask>(`/agent/conversations/${conversationId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteTask: (conversationId: number, taskId: number) =>
+    fetchApi<void>(`/agent/conversations/${conversationId}/tasks/${taskId}`, { method: 'DELETE' }),
 };
 
 export const customerApi = {
