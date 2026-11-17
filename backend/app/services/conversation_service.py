@@ -492,7 +492,7 @@ def get_visible_messages(
     include_internal = user.role in ("agent", "admin")
     messages_q = db.query(Message).filter(Message.conversation_id == conversation_id)
     if not include_internal:
-        messages_q = messages_q.filter(Message.is_internal == False)  # noqa: E712
+        messages_q = messages_q.filter(Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
     return messages_q.order_by(Message.created_at.asc(), Message.id.asc()).offset(offset).limit(limit).all()
 
 
@@ -501,7 +501,7 @@ def build_conversation_list_item(db: Session, conversation: Conversation, viewer
     # Get last message
     last_msg = (
         db.query(Message)
-        .filter(Message.conversation_id == conversation.id, Message.is_internal == False)  # noqa: E712
+        .filter(Message.conversation_id == conversation.id, Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
         .order_by(Message.created_at.desc())
         .first()
     )

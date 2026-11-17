@@ -66,6 +66,14 @@ class Message(Base):
 
     ai_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    edited_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    edit_history: Mapped[list | None] = mapped_column(JSON, default=list, server_default="[]", nullable=True)
+
+    is_retracted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    retracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retracted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -79,5 +87,15 @@ class Message(Base):
     sender = relationship(
         "User",
         foreign_keys=[sender_id],
+    )
+
+    edited_by = relationship(
+        "User",
+        foreign_keys=[edited_by_id],
+    )
+
+    retracted_by = relationship(
+        "User",
+        foreign_keys=[retracted_by_id],
     )
 

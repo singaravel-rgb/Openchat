@@ -66,6 +66,10 @@ export interface Message {
   processed_at?: string | null;
   client_message_id?: string | null;
   created_at: string;
+  edited_at?: string | null;
+  edited_by_id?: number | null;
+  is_retracted?: boolean;
+  retracted_at?: string | null;
 }
 
 export type MessageSenderType = 'customer' | 'agent' | 'ai' | 'system';

@@ -114,22 +114,7 @@ def _conversation_detail(
         global_note_updated_at=conversation.global_note_updated_at,
         global_note_updated_by_id=conversation.global_note_updated_by_id,
         global_note_updated_by_name=conversation.global_note_updated_by.full_name if conversation.global_note_updated_by else None,
-        messages=[
-            MessageResponse(
-                id=m.id,
-                conversation_id=m.conversation_id,
-                sender_id=m.sender_id,
-                sender_type=m.sender_type,
-                message_type=m.message_type,
-                content=m.content,
-                is_internal=m.is_internal,
-                delivery_status=getattr(m, "delivery_status", "delivered"),
-                processed_at=getattr(m, "processed_at", None),
-                client_message_id=getattr(m, "client_message_id", None),
-                created_at=m.created_at,
-            )
-            for m in messages
-        ],
+        messages=[MessageResponse.model_validate(m) for m in messages],
         customer_name=item.get("customer_name"),
         customer_email=item.get("customer_email"),
         assigned_agent_name=item.get("assigned_agent_name"),

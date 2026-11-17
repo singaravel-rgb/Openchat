@@ -281,7 +281,7 @@ async def create_conversation(
 
     messages = (
         db.query(Message)
-        .filter(Message.conversation_id == conversation.id, Message.is_internal == False)  # noqa: E712
+        .filter(Message.conversation_id == conversation.id, Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
         .order_by(Message.created_at.asc(), Message.id.asc())
         .all()
     )
@@ -308,7 +308,7 @@ def get_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = (
         db.query(Message)
-        .filter(Message.conversation_id == conversation.id, Message.is_internal == False)  # noqa: E712
+        .filter(Message.conversation_id == conversation.id, Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
         .order_by(Message.created_at.asc(), Message.id.asc())
         .all()
     )

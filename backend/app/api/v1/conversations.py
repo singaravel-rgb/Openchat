@@ -1,4 +1,6 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timezone
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -14,6 +16,8 @@ from app.schemas.conversation import (
     ConversationDetail,
     ConversationListItem,
     MessageCreate,
+    MessageEdit,
+    MessageRetract,
     MessageResponse,
     ConversationUpdate,
     GlobalNoteUpdate,
@@ -95,13 +99,15 @@ def get_conversation(
     include_internal = current_user.role in ("agent", "admin")
     messages_q = db.query(Message).filter(Message.conversation_id == conversation_id)
     if not include_internal:
-        messages_q = messages_q.filter(Message.is_internal == False)  # noqa: E712
+        messages_q = messages_q.filter(Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
     messages = messages_q.order_by(Message.created_at.asc(), Message.id.asc()).offset(offset).limit(limit).all()
 
     if current_user.role == "customer":
         mark_conversation_read(db, conversation, "customer")
         db.commit()
         db.refresh(conversation)
+
+    item = build_conversation_list_item(db, conversation, viewer=current_user)
 
     return ConversationDetail(
         id=conversation.id,
@@ -124,23 +130,13 @@ def get_conversation(
         global_note_updated_at=conversation.global_note_updated_at if include_internal else None,
         global_note_updated_by_id=conversation.global_note_updated_by_id if include_internal else None,
         global_note_updated_by_name=(conversation.global_note_updated_by.full_name if conversation.global_note_updated_by else None) if include_internal else None,
-        messages=[
-MessageResponse(
-                  id=m.id,
-                  conversation_id=m.conversation_id,
-                  sender_id=m.sender_id,
-                  sender_type=m.sender_type,
-                  message_type=m.message_type,
-                  content=m.content,
-                  is_internal=m.is_internal,
-                  delivery_status=getattr(m, "delivery_status", "delivered"),
-                  processed_at=getattr(m, "processed_at", None),
-                  client_message_id=getattr(m, "client_message_id", None),
-                  ai_metadata=getattr(m, "ai_metadata", None),
-                  created_at=m.created_at,
-              )
-              for m in messages
-          ],
+        messages=[MessageResponse.model_validate(m) for m in messages],
+        customer_name=item.get("customer_name"),
+        customer_email=item.get("customer_email"),
+        assigned_agent_name=item.get("assigned_agent_name"),
+        last_message=item.get("last_message"),
+        last_message_at=item.get("last_message_at"),
+        unread_count=item.get("unread_count", 0),
     )
 
 
@@ -283,3 +279,97 @@ def update_global_note_endpoint(
     ensure_can_view(current_user, conversation)
     res = update_global_note(db, conversation, data.text, current_user)
     return res
+
+
+@router.patch("/{conversation_id}/messages/{message_id}", response_model=MessageResponse)
+def edit_private_note(
+    conversation_id: int,
+    message_id: int,
+    data: MessageEdit,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Edit an internal private note. Permitted for the note author or admins."""
+    if current_user.role not in ("agent", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden: only agents and admins can edit private notes")
+
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+
+    message = db.query(Message).filter(Message.id == message_id, Message.conversation_id == conversation_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if not message.is_internal:
+        raise HTTPException(status_code=400, detail="Only private notes can be edited")
+
+    if current_user.role != "admin" and message.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only edit your own private notes")
+
+    now = datetime.now(timezone.utc)
+    history_entry = {
+        "content": message.content,
+        "edited_at": now.isoformat(),
+        "edited_by_id": current_user.id,
+        "edited_by_name": current_user.full_name,
+    }
+    current_history = list(message.edit_history) if message.edit_history else []
+    current_history.append(history_entry)
+    message.edit_history = current_history
+    message.content = data.content
+    message.edited_at = now
+    message.edited_by_id = current_user.id
+
+    db.commit()
+    db.refresh(message)
+    return MessageResponse.model_validate(message)
+
+
+@router.post("/{conversation_id}/messages/{message_id}/retract")
+def retract_message(
+    conversation_id: int,
+    message_id: int,
+    data: Optional[MessageRetract] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Undo / retract a sent agent message within 5 seconds."""
+    if current_user.role not in ("agent", "admin"):
+        raise HTTPException(status_code=403, detail="Forbidden: only agents and admins can retract messages")
+
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+
+    message = db.query(Message).filter(Message.id == message_id, Message.conversation_id == conversation_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if message.is_internal:
+        raise HTTPException(status_code=400, detail="Private notes cannot be retracted; use the edit functionality")
+
+    if current_user.role != "admin" and message.sender_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only undo/retract your own messages")
+
+    if message.is_retracted:
+        raise HTTPException(status_code=400, detail="Message has already been retracted")
+
+    now = datetime.now(timezone.utc)
+    msg_created = message.created_at
+    if msg_created.tzinfo is None:
+        msg_created = msg_created.replace(tzinfo=timezone.utc)
+    diff = (now - msg_created).total_seconds()
+    if diff > 6.0:  # 5s window + 1s network latency buffer
+        raise HTTPException(status_code=400, detail="Undo window has expired (exceeded 5 seconds)")
+
+    message.is_retracted = True
+    message.retracted_at = now
+    message.retracted_by_id = current_user.id
+
+    db.commit()
+    db.refresh(message)
+    return {"message": "Message retracted successfully", "id": message.id}
+

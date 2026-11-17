@@ -111,6 +111,17 @@ export const conversationApi = {
       method: 'PATCH',
       body: JSON.stringify({ note: content, content }),
     }),
+
+  editMessage: (conversationId: number, messageId: number, content: string) =>
+    fetchApi<ConversationDetail['messages'][0]>(`/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    }),
+
+  retractMessage: (conversationId: number, messageId: number) =>
+    fetchApi<{ message: string; id: number }>(`/conversations/${conversationId}/messages/${messageId}/retract`, {
+      method: 'POST',
+    }),
 };
 
 export const agentApi = {
@@ -202,6 +213,12 @@ export const agentApi = {
 
   deleteTask: (conversationId: number, taskId: number) =>
     fetchApi<void>(`/agent/conversations/${conversationId}/tasks/${taskId}`, { method: 'DELETE' }),
+
+  editMessage: (conversationId: number, messageId: number, content: string) =>
+    conversationApi.editMessage(conversationId, messageId, content),
+
+  retractMessage: (conversationId: number, messageId: number) =>
+    conversationApi.retractMessage(conversationId, messageId),
 };
 
 export const customerApi = {
@@ -323,6 +340,12 @@ export const adminApi = {
 
   reopenConversation: (id: number) =>
     fetchApi<{ message: string }>(`/admin/conversations/${id}/reopen`, { method: 'POST' }),
+
+  editMessage: (conversationId: number, messageId: number, content: string) =>
+    conversationApi.editMessage(conversationId, messageId, content),
+
+  retractMessage: (conversationId: number, messageId: number) =>
+    conversationApi.retractMessage(conversationId, messageId),
 
   suggestAgentReply: (id: number) =>
     fetchApi<{ draft: string; provider: string; usage: Record<string, unknown>; sources: Array<{ type: string; id: number; title: string; excerpt: string | null; score: number }> }>(`/agent/conversations/${id}/ai-suggest`, { method: 'POST' }),

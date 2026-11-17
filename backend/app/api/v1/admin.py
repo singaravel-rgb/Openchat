@@ -333,6 +333,8 @@ def get_conversation_admin(
     db.commit()
     db.refresh(conversation)
 
+    item = build_conversation_list_item(db, conversation, viewer=current_user)
+
     return ConversationDetail(
         id=conversation.id,
         customer_id=conversation.customer_id,
@@ -355,6 +357,12 @@ def get_conversation_admin(
         global_note_updated_by_id=conversation.global_note_updated_by_id,
         global_note_updated_by_name=conversation.global_note_updated_by.full_name if conversation.global_note_updated_by else None,
         messages=[MessageResponse.model_validate(m) for m in messages],
+        customer_name=item.get("customer_name"),
+        customer_email=item.get("customer_email"),
+        assigned_agent_name=item.get("assigned_agent_name"),
+        last_message=item.get("last_message"),
+        last_message_at=item.get("last_message_at"),
+        unread_count=item.get("unread_count", 0),
     )
 
 

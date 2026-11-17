@@ -46,8 +46,8 @@ const cleanDemoPrefix = (content: string): string => {
 
 const senderInfo = (message: Message) => {
   switch (message.sender_type) {
-    case 'customer': return { name: 'Customer', color: 'bg-slate-500', align: 'right' as const };
-    case 'agent': return { name: 'Agent', color: 'bg-indigo-500', align: 'left' as const };
+    case 'customer': return { name: 'Customer', color: 'bg-slate-500', align: 'left' as const };
+    case 'agent': return { name: 'Agent', color: 'bg-blue-600', align: 'right' as const };
     case 'ai': return { name: 'AI Assistant', color: 'bg-purple-500', align: 'left' as const };
     case 'system': return { name: 'System', color: 'bg-orange-500', align: 'left' as const };
     default: return { name: 'Unknown', color: 'bg-slate-500', align: 'left' as const };
@@ -191,6 +191,14 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [isEditingGlobalNote, setIsEditingGlobalNote] = useState(false);
   const [savingGlobalNote, setSavingGlobalNote] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+
+  // Private note editing
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const [editingNoteContent, setEditingNoteContent] = useState<string>('');
+  const [savingNoteEdit, setSavingNoteEdit] = useState<boolean>(false);
+
+  // Agent message undo (5-second window)
+  const [undoMessage, setUndoMessage] = useState<{ id: number; timeLeft: number } | null>(null);
 
   // Mention autocomplete state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -479,6 +487,76 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     }
   }, [selectedConversation, userRole, loadConversation]);
 
+  // Undo countdown timer
+  useEffect(() => {
+    if (!undoMessage) return;
+    if (undoMessage.timeLeft <= 0) {
+      setUndoMessage(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setUndoMessage((prev) => {
+        if (!prev) return null;
+        if (prev.timeLeft <= 1) return null;
+        return { ...prev, timeLeft: prev.timeLeft - 1 };
+      });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [undoMessage]);
+
+  const handleUndoMessage = useCallback(async (msgId: number) => {
+    if (!selectedConversation) return;
+    try {
+      const api = userRole === 'admin' ? adminApi : agentApi;
+      await api.retractMessage(selectedConversation.id, msgId);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId ? { ...m, is_retracted: true, retracted_at: new Date().toISOString() } : m
+        )
+      );
+      setUndoMessage(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to undo message');
+    }
+  }, [selectedConversation, userRole]);
+
+  const handleStartEditNote = useCallback((message: Message) => {
+    setEditingNoteId(message.id);
+    setEditingNoteContent(message.content);
+  }, []);
+
+  const handleCancelEditNote = useCallback(() => {
+    setEditingNoteId(null);
+    setEditingNoteContent('');
+  }, []);
+
+  const handleSaveEditNote = useCallback(async (messageId: number) => {
+    if (!selectedConversation || !editingNoteContent.trim()) return;
+    setSavingNoteEdit(true);
+    try {
+      const api = userRole === 'admin' ? adminApi : agentApi;
+      const updated = await api.editMessage(selectedConversation.id, messageId, editingNoteContent.trim());
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                content: updated.content,
+                edited_at: updated.edited_at,
+                edited_by_id: updated.edited_by_id,
+              }
+            : m
+        )
+      );
+      setEditingNoteId(null);
+      setEditingNoteContent('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to edit note');
+    } finally {
+      setSavingNoteEdit(false);
+    }
+  }, [selectedConversation, editingNoteContent, userRole]);
+
   const handleSaveContact = useCallback(async () => {
     if (!selectedConversation || !contactName.trim()) {
       setError('Customer name is required');
@@ -634,14 +712,21 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     try {
       const clientId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const api = userRole === 'admin' ? adminApi : agentApi;
+      const sentIsInternal = isInternal;
       const newMsg = await api.sendMessage(selectedConversation.id, {
         content: messageInput,
-        is_internal: isInternal,
+        is_internal: sentIsInternal,
         client_message_id: clientId,
       });
       setMessages(prev => [...prev, newMsg]);
       setMessageInput('');
       setIsInternal(false);
+
+      // 5-second undo window for customer-facing agent messages
+      if (!sentIsInternal && newMsg && newMsg.id) {
+        setUndoMessage({ id: newMsg.id, timeLeft: 5 });
+      }
+
       await loadConversation(selectedConversation.id);
       await loadConversations();
     } catch (err) {
@@ -1082,134 +1167,135 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         ) : (
           <div className="flex flex-col h-full">
             {/* Conversation Header */}
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0 sticky top-0 z-10">
-              <div className="flex items-center gap-4 flex-wrap">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0 sticky top-0 z-10">
+              <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <Avatar
                     name={selectedConversation.customer_name || 'Unknown'}
-                    size="lg"
+                    size="md"
                     className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex-shrink-0"
                   />
-                  <div className="min-w-0">
-                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white truncate">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-base font-semibold text-slate-900 dark:text-white truncate">
                       {selectedConversation.subject || 'No Subject'}
                     </h2>
-                    <div className="flex items-center gap-2 mt-1 text-sm text-slate-500 dark:text-slate-400 flex-wrap">
-                      <span className="truncate">{selectedConversation.customer_name || 'Unknown Customer'}</span>
-                      <Badge variant="success" className="text-[10px]">
-                        <svg className="mr-0.5 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[160px]">{selectedConversation.customer_name || 'Unknown Customer'}</span>
+                      <Badge variant="success" className="text-[10px] px-1 py-0 flex-shrink-0 inline-flex items-center">
+                        <svg className="mr-0.5 h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                         </svg>
                         Verified
                       </Badge>
-                      <span>•</span>
-                      <span className="truncate">{selectedConversation.customer_email || ''}</span>
-                      {selectedConversation.channel && (
+                      {selectedConversation.customer_email && (
                         <>
-                          <span>•</span>
-                          <Badge variant="info" className="text-xs capitalize">{selectedConversation.channel}</Badge>
+                          <span className="flex-shrink-0">•</span>
+                          <span className="truncate max-w-[200px]">{selectedConversation.customer_email}</span>
                         </>
                       )}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    {/* Interactive Status Selector */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowStatusMenu((v) => !v)}
-                        className="inline-flex items-center gap-1 rounded-full focus:outline-none"
-                        title="Change conversation status"
-                      >
-                        <Badge
-                          variant={getStatusBadgeVariant(selectedConversation.status)}
-                          className="cursor-pointer hover:opacity-90 capitalize"
-                        >
-                          {selectedConversation.status.replace('_', ' ')}
-                          <svg className="ml-1 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </Badge>
-                      </button>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {selectedConversation.status === 'pending' && userRole === 'agent' && (
+                    <Button variant="outline" size="sm" onClick={handleTake}>
+                      Take
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => { setShowAssignModal(true); setAssignAgentId(''); setAssignNote(''); }}>
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    Assign
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => { setShowPriorityModal(true); setNewPriority(selectedConversation.priority || 'normal'); }}>
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                    </svg>
+                    Priority
+                  </Button>
 
-                      {showStatusMenu && (
-                        <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                            Set Status
-                          </div>
-                          {[
-                            { key: 'open', label: 'Open', desc: 'Actively being handled', variant: 'primary' },
-                            { key: 'pending', label: 'Pending', desc: 'Waiting for assignment', variant: 'warning' },
-                            { key: 'waiting_on_customer', label: 'Waiting on Customer', desc: 'Waiting for customer reply', variant: 'ai' },
-                            { key: 'on_hold', label: 'On Hold', desc: 'Paused & unassigned', variant: 'system' },
-                            { key: 'resolved', label: 'Resolved', desc: 'Issue marked resolved', variant: 'success' },
-                          ].map((item) => (
-                            <button
-                              key={item.key}
-                              type="button"
-                              onClick={() => {
-                                setShowStatusMenu(false);
-                                if (item.key === 'resolved') {
-                                  setShowResolveModal(true);
-                                } else {
-                                  handleStatusChange(item.key);
-                                }
-                              }}
-                              className={`flex w-full items-start gap-2 rounded-md p-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 ${
-                                selectedConversation.status === item.key ? 'bg-slate-100 font-semibold dark:bg-slate-800' : ''
-                              }`}
-                            >
-                              <span className="mt-0.5">
-                                <Badge variant={item.variant as any} className="px-1.5 py-0 text-[10px]">
-                                  {item.label}
-                                </Badge>
-                              </span>
-                              <span className="text-[11px] text-slate-500 dark:text-slate-400">{item.desc}</span>
-                            </button>
-                          ))}
+                  {/* Status Dropdown (replaces Resolve button) */}
+                  <div className="relative">
+                    <Button
+                      id="header-status-dropdown"
+                      aria-label="Change conversation status"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowStatusMenu((v) => !v)}
+                      className="capitalize inline-flex items-center"
+                    >
+                      <span
+                        className={`mr-1.5 inline-block h-2 w-2 rounded-full ${
+                          selectedConversation.status === 'open'
+                            ? 'bg-blue-500'
+                            : selectedConversation.status === 'pending'
+                            ? 'bg-amber-500'
+                            : selectedConversation.status === 'waiting_on_customer'
+                            ? 'bg-purple-500'
+                            : selectedConversation.status === 'on_hold'
+                            ? 'bg-slate-500'
+                            : selectedConversation.status === 'resolved' || selectedConversation.status === 'closed'
+                            ? 'bg-emerald-500'
+                            : 'bg-blue-500'
+                        }`}
+                      />
+                      {selectedConversation.status === 'waiting_on_customer'
+                        ? 'Waiting on Customer'
+                        : selectedConversation.status === 'on_hold'
+                        ? 'On Hold'
+                        : selectedConversation.status.charAt(0).toUpperCase() + selectedConversation.status.slice(1)}
+                      <svg className="ml-1.5 h-3.5 w-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </Button>
+
+                    {showStatusMenu && (
+                      <div className="absolute right-0 top-full z-40 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                        <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                          Change Status
                         </div>
-                      )}
-                    </div>
-
-                    <Badge variant={getPriorityBadgeVariant(selectedConversation.priority || 'normal')}>
-                      {selectedConversation.priority || 'normal'}
-                    </Badge>
+                        {[
+                          { key: 'open', label: 'Open', desc: 'Actively being handled', dot: 'bg-blue-500' },
+                          { key: 'pending', label: 'Pending', desc: 'Waiting for assignment', dot: 'bg-amber-500' },
+                          { key: 'waiting_on_customer', label: 'Waiting on Customer', desc: 'Waiting for customer reply', dot: 'bg-purple-500' },
+                          { key: 'on_hold', label: 'On Hold', desc: 'Paused & unassigned', dot: 'bg-slate-500' },
+                          { key: 'resolved', label: 'Resolved', desc: 'Issue marked resolved', dot: 'bg-emerald-500' },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => {
+                              setShowStatusMenu(false);
+                              if (item.key === 'resolved') {
+                                setShowResolveModal(true);
+                              } else {
+                                handleStatusChange(item.key);
+                              }
+                            }}
+                            className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                              selectedConversation.status === item.key
+                                ? 'bg-slate-100 font-semibold text-blue-600 dark:bg-slate-800 dark:text-blue-400'
+                                : 'text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={`h-2 w-2 rounded-full ${item.dot}`} />
+                              <div>
+                                <p className="font-medium leading-none">{item.label}</p>
+                                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{item.desc}</p>
+                              </div>
+                            </div>
+                            {selectedConversation.status === item.key && (
+                              <svg className="h-4 w-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    {selectedConversation.status === 'pending' && userRole === 'agent' && (
-                      <Button variant="outline" size="sm" onClick={handleTake}>
-                        Take
-                      </Button>
-                    )}
-                    <Button variant="outline" size="sm" onClick={() => { setShowAssignModal(true); setAssignAgentId(''); setAssignNote(''); }}>
-                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                      Assign
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => { setShowPriorityModal(true); setNewPriority(selectedConversation.priority || 'normal'); }}>
-                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                      </svg>
-                      Priority
-                    </Button>
-                    {selectedConversation.status !== 'resolved' && selectedConversation.status !== 'closed' ? (
-                      <Button variant="outline" size="sm" onClick={() => { setShowResolveModal(true); setResolveDetails(''); }}>
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Resolve
-                      </Button>
-                    ) : (
-                      <Button variant="outline" size="sm" onClick={handleReopen}>
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        Reopen
-                      </Button>
-                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1227,7 +1313,6 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   </div>
                 </div>
               </div>
-            </div>
 
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={messagesContainerRef} role="log" aria-live="polite">
@@ -1252,7 +1337,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     message.message_type === 'system_event' || String(message.sender_type) === 'system';
                   if (isSystemEvent) {
                     return (
-                      <div key={message.id} className="flex justify-center">
+                      <div key={message.id} className="flex justify-center my-2">
                         <div className="max-w-[80%] rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-center text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                           {cleanDemoPrefix(message.content)}{' '}
                           <span className="text-slate-400 dark:text-slate-500">
@@ -1262,99 +1347,215 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       </div>
                     );
                   }
-                  const isInternalNote = message.message_type === 'internal_note' || message.is_internal;
-                  const isAiMessage = info.name === 'AI Assistant' || String(message.sender_type) === 'ai';
-                  return (
-                    <div
-                      key={message.id}
-                      className={`flex gap-3 ${info.align === 'right' ? 'flex-row-reverse' : ''} ${isInternalNote ? 'opacity-90' : ''}`}
-                    >
-                      {info.align === 'left' && !isInternalNote && !isAiMessage && (
-                        <Avatar name={info.name} size="sm" className={info.color} />
-                      )}
-                      {info.align === 'left' && isAiMessage && !isInternalNote && (
-                        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/40">
-                          <svg className="h-4 w-4 text-purple-700 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                          </svg>
-                        </div>
-                      )}
-                      {info.align === 'left' && isInternalNote && (
-                        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
-                          <svg className="h-4 w-4 text-amber-700 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </div>
-                      )}
-                      <div className="max-w-[85%] flex-1">
-                        {info.align !== 'right' && (
-                          <div className="mb-1 flex flex-wrap items-center gap-2">
-                            <span
-                              className={`text-sm font-medium ${
-                                isInternalNote
-                                  ? 'text-amber-700 dark:text-amber-400'
-                                  : isAiMessage
-                                    ? 'text-purple-700 dark:text-purple-300'
-                                    : 'text-slate-700 dark:text-slate-300'
-                              }`}
-                            >
-                              {isInternalNote ? 'Private Note' : isAiMessage ? 'AI Assistant' : info.name}
+
+                  // Retracted message display (visible only to agents/admins)
+                  if (message.is_retracted) {
+                    return (
+                      <div key={message.id} className="flex justify-end my-1.5">
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/80 px-3 py-1.5 text-xs italic text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+                          <span className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                            </svg>
+                            Message retracted
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 not-italic">
+                              {formatTimestamp(message.retracted_at || message.created_at)}
                             </span>
-                            {isInternalNote && (
-                              <Badge variant="warning" className="text-[10px]">
-                                Only visible to agents
-                              </Badge>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const isInternalNote = message.message_type === 'internal_note' || message.is_internal;
+
+                  // Requirement 4 & 5: Private Note (Internal collaboration card)
+                  if (isInternalNote) {
+                    const canEdit = userRole === 'admin' || (message.sender_id === userId);
+                    return (
+                      <div
+                        key={message.id}
+                        className="mx-auto my-2 w-full max-w-2xl rounded-lg border border-amber-200 bg-amber-50/90 p-3 shadow-sm dark:border-amber-800/60 dark:bg-amber-950/30"
+                      >
+                        <div className="flex items-center justify-between gap-2 border-b border-amber-200/60 pb-1.5 mb-2 dark:border-amber-800/40">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
+                              <svg className="w-3 h-3 text-amber-700 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                              </svg>
+                              PRIVATE NOTE / INTERNAL
+                            </span>
+                            <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                              {message.sender_id === userId ? 'You' : (userRole === 'admin' ? 'Agent/Admin' : 'Colleague')}
+                            </span>
+                            {message.edited_at && (
+                              <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80 italic">
+                                (edited {formatTimestamp(message.edited_at)})
+                              </span>
                             )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <time className="text-[11px] text-amber-800/70 dark:text-amber-400/70">
+                              {formatFullTimestamp(message.created_at)}
+                            </time>
+                            {canEdit && editingNoteId !== message.id && (
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditNote(message)}
+                                className="text-xs font-medium text-amber-800 hover:text-amber-950 dark:text-amber-300 dark:hover:text-amber-100 underline ml-2"
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {editingNoteId === message.id ? (
+                          <div className="space-y-2 mt-2">
+                            <textarea
+                              value={editingNoteContent}
+                              onChange={(e) => setEditingNoteContent(e.target.value)}
+                              rows={3}
+                              className="w-full rounded border border-amber-300 bg-white p-2 text-xs text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-amber-700 dark:bg-slate-900 dark:text-slate-100"
+                              autoFocus
+                            />
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs"
+                                onClick={handleCancelEditNote}
+                                disabled={savingNoteEdit}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-6 px-3 text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                                onClick={() => handleSaveEditNote(message.id)}
+                                disabled={savingNoteEdit || !editingNoteContent.trim()}
+                              >
+                                {savingNoteEdit ? 'Saving...' : 'Save'}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-xs leading-relaxed text-amber-950 dark:text-amber-100 whitespace-pre-wrap">
+                            {message.content.split(/(@[a-zA-Z0-9_\s.-]+?)(?=[,\.!?\s]|$)/g).map((part, i) =>
+                              part.startsWith('@') ? (
+                                <span key={i} className="inline-flex items-center rounded bg-amber-200/80 px-1 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
+                                  {part}
+                                </span>
+                              ) : (
+                                <span key={i}>{part}</span>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  const isAiMessage = info.name === 'AI Assistant' || String(message.sender_type) === 'ai';
+                  const isAgent = message.sender_type === 'agent' || info.align === 'right';
+
+                  // Requirement 5: WhatsApp-style alignment
+                  // Customer or AI: Aligned to LEFT
+                  if (!isAgent) {
+                    return (
+                      <div key={message.id} className="flex gap-3 justify-start items-start">
+                        {isAiMessage ? (
+                          <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/40">
+                            <svg className="h-4 w-4 text-purple-700 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                          </div>
+                        ) : (
+                          <Avatar
+                            name={selectedConversation?.customer_name || 'Customer'}
+                            size="sm"
+                            className="bg-slate-400 text-white flex-shrink-0"
+                          />
+                        )}
+                        <div className="max-w-[75%]">
+                          <div className="mb-1 flex items-center gap-2">
+                            <span className={`text-xs font-semibold ${isAiMessage ? 'text-purple-700 dark:text-purple-300' : 'text-slate-800 dark:text-slate-200'}`}>
+                              {isAiMessage ? 'AI Assistant' : (selectedConversation?.customer_name || 'Customer')}
+                            </span>
                             {isAiMessage && (
                               <Badge variant="info" className="text-[10px]">
                                 AI
                               </Badge>
                             )}
-                            <time className="ml-auto text-xs text-slate-500 dark:text-slate-400">
-                              {formatFullTimestamp(message.created_at)}
+                            <time className="text-[11px] text-slate-400 dark:text-slate-500">
+                              {formatTimestamp(message.created_at)}
                             </time>
                           </div>
-                        )}
-                        <div
-                          className={`rounded-lg p-3 ${
-                            info.align === 'right'
-                              ? 'rounded-tr-none bg-blue-600 text-white shadow-sm'
-                              : isInternalNote
-                                ? 'rounded-tl-none border border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-900/25 dark:text-amber-100'
-                                : isAiMessage
-                                  ? 'rounded-tl-none border border-purple-200 bg-purple-50 text-purple-900 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-100'
-                                  : 'rounded-tl-none border border-slate-200 bg-white text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
-                          }`}
-                        >
-                          {isAiMessage && String(message.content).startsWith('[DEMO AI]') && (
-                            <Badge variant="info" className="mr-1 text-[10px]">
-                              Demo
-                            </Badge>
-                          )}
-                          {cleanDemoPrefix(message.content)}
-                        </div>
-                        {info.align === 'right' && (
-                          <div className="mt-1 flex items-center gap-2">
-                            <time className="text-xs text-blue-200 dark:text-blue-300">
-                              {formatFullTimestamp(message.created_at)}
-                            </time>
-                            {message.is_internal && (
-                              <Badge variant="warning" className="text-[10px]">
-                                Internal
+                          <div className={`rounded-lg rounded-tl-none p-3 shadow-sm text-sm ${
+                            isAiMessage
+                              ? 'border border-purple-200 bg-purple-50 text-purple-900 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-100'
+                              : 'border border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                          }`}>
+                            {isAiMessage && String(message.content).startsWith('[DEMO AI]') && (
+                              <Badge variant="info" className="mr-1 text-[10px]">
+                                Demo
                               </Badge>
                             )}
+                            <div className="whitespace-pre-wrap">{cleanDemoPrefix(message.content)}</div>
                           </div>
-                        )}
+                        </div>
                       </div>
-                      {info.align === 'right' && (
-                        <Avatar name={String(userId)} size="sm" className="bg-blue-600" />
-                      )}
-                      {info.align === 'left' && (isInternalNote || isAiMessage) && <div className="w-8" />}
+                    );
+                  }
+
+                  // Agent: Aligned to RIGHT (WhatsApp style)
+                  const isCurrentUser = message.sender_id === userId;
+                  const agentDisplayName = isCurrentUser ? 'You' : (userRole === 'admin' ? 'Agent' : 'Staff');
+
+                  return (
+                    <div key={message.id} className="flex gap-3 justify-end items-start">
+                      <div className="max-w-[75%] flex flex-col items-end">
+                        <div className="mb-1 flex items-center gap-2">
+                          <time className="text-[11px] text-slate-400 dark:text-slate-500">
+                            {formatTimestamp(message.created_at)}
+                          </time>
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            {agentDisplayName}
+                          </span>
+                        </div>
+                        <div className="rounded-lg rounded-tr-none bg-blue-600 text-white p-3 shadow-sm text-sm whitespace-pre-wrap">
+                          {message.content}
+                        </div>
+                      </div>
+                      <Avatar
+                        name={agentDisplayName}
+                        size="sm"
+                        className="bg-blue-600 text-white flex-shrink-0"
+                      />
                     </div>
                   );
                 })}
               <div ref={messagesEndRef} />
             </div>
+
+            {/* Requirement 6: 5-Second Undo Toast Banner */}
+            {undoMessage && undoMessage.timeLeft > 0 && (
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 rounded-lg shadow-lg border border-slate-700 dark:border-slate-300 mx-4 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                <div className="flex items-center gap-2.5 text-xs">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Message sent to customer. Undo window: <strong>{undoMessage.timeLeft}s</strong></span>
+                </div>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  className="h-6 px-2.5 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white"
+                  onClick={() => handleUndoMessage(undoMessage.id)}
+                >
+                  Undo
+                </Button>
+              </div>
+            )}
+
             {/* Composer */}
             <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -1605,19 +1806,6 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               </button>
               <button
                 type="button"
-                title="To-do"
-                onClick={() => {
-                  setRightPanelOpen(true);
-                  setRightDetailsSection('todo');
-                }}
-                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                </svg>
-              </button>
-              <button
-                type="button"
                 title="Recent timeline"
                 onClick={() => {
                   setRightPanelOpen(true);
@@ -1759,159 +1947,6 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                      </div>
                    )}
                  </div>
-
-                 {/* Global Note (One persistent note per conversation, strictly internal) */}
-                 {userRole !== 'customer' && (
-                   <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                     <div className="flex w-full items-center justify-between gap-2">
-                       <button
-                         type="button"
-                         className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300"
-                         onClick={() => setShowGlobalNote((v) => !v)}
-                       >
-                         <span className="flex items-center gap-1.5">
-                           <svg className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                           </svg>
-                           Global Note
-                         </span>
-                         <Badge variant="warning" className="text-[9px] px-1 py-0">Internal</Badge>
-                         <svg className={`w-3.5 h-3.5 transition-transform text-slate-400 ${showGlobalNote ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                         </svg>
-                       </button>
-
-                       {!isEditingGlobalNote && (
-                         <button
-                           type="button"
-                           onClick={() => {
-                             setGlobalNoteDraft(globalNote);
-                             setIsEditingGlobalNote(true);
-                           }}
-                           className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                         >
-                           {globalNote ? 'Edit' : '+ Add Note'}
-                         </button>
-                       )}
-                     </div>
-
-                     {showGlobalNote && (
-                       <div className="mt-2.5">
-                         {isEditingGlobalNote ? (
-                           <div className="space-y-2">
-                             <div className="relative">
-                               <textarea
-                                 value={globalNoteDraft}
-                                 onChange={(e) => handleTextareaChange(e.target.value, 'global_note', e.target.selectionStart || 0)}
-                                 onKeyUp={(e) => {
-                                   const target = e.target as HTMLTextAreaElement;
-                                   handleTextareaChange(target.value, 'global_note', target.selectionStart || 0);
-                                 }}
-                                 rows={4}
-                                 placeholder="Write shared conversation notes, handoff context, or action items... (Type @ to mention team members)"
-                                 className="w-full rounded-md border border-slate-300 bg-white p-2 text-xs text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                                 autoFocus
-                               />
-
-                               {/* Mention autocomplete dropdown */}
-                               {mentionTarget === 'global_note' && matchingAgents.length > 0 && (
-                                 <div className="absolute left-0 top-full z-30 mt-1 max-h-48 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                                   <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                                     Mention Agent
-                                   </div>
-                                   {matchingAgents.map((agent) => (
-                                     <button
-                                       key={agent.id}
-                                       type="button"
-                                       onClick={() => insertMention(agent)}
-                                       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800"
-                                     >
-                                       <Avatar name={agent.full_name} size="sm" />
-                                       <div className="min-w-0 flex-1">
-                                         <p className="truncate font-medium text-slate-900 dark:text-white">
-                                           {agent.full_name}
-                                         </p>
-                                         <p className="truncate text-[10px] text-slate-400">{agent.email}</p>
-                                       </div>
-                                     </button>
-                                   ))}
-                                 </div>
-                               )}
-                             </div>
-
-                             <div className="flex items-center justify-between text-[11px] text-slate-400">
-                               <span>Type <span className="font-semibold text-slate-600 dark:text-slate-300">@</span> to tag agents</span>
-                               <div className="flex items-center gap-1.5">
-                                 <Button
-                                   variant="ghost"
-                                   size="sm"
-                                   onClick={() => {
-                                     setIsEditingGlobalNote(false);
-                                     setGlobalNoteDraft(globalNote);
-                                     setMentionTarget(null);
-                                   }}
-                                   disabled={savingGlobalNote}
-                                   className="h-6 px-2 text-xs"
-                                 >
-                                   Cancel
-                                 </Button>
-                                 <Button
-                                   size="sm"
-                                   onClick={handleSaveGlobalNote}
-                                   disabled={savingGlobalNote}
-                                   className="h-6 px-3 text-xs"
-                                 >
-                                   {savingGlobalNote ? 'Saving...' : 'Save Note'}
-                                 </Button>
-                               </div>
-                             </div>
-                           </div>
-                         ) : (
-                           <div>
-                             {globalNote ? (
-                               <div className="rounded border border-amber-200/70 bg-amber-50/50 p-2.5 dark:border-amber-900/40 dark:bg-amber-950/20">
-                                 <div className="text-xs leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-wrap">
-                                   {globalNote.split(/(@[a-zA-Z0-9_\s.-]+?)(?=[,\.!?\s]|$)/g).map((part, i) =>
-                                     part.startsWith('@') ? (
-                                       <span key={i} className="inline-flex items-center rounded bg-indigo-100 px-1 py-0.5 text-[11px] font-semibold text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300">
-                                         {part}
-                                       </span>
-                                     ) : (
-                                       <span key={i}>{part}</span>
-                                     )
-                                   )}
-                                 </div>
-                                 {globalNoteUpdatedAt && (
-                                   <div className="mt-2 flex items-center justify-between border-t border-amber-200/50 pt-1.5 text-[10px] text-slate-500 dark:border-amber-900/30 dark:text-slate-400">
-                                     <span>
-                                       Updated by <span className="font-medium text-slate-700 dark:text-slate-300">{globalNoteUpdatedByName || 'Agent'}</span>
-                                     </span>
-                                     <span>{formatFullTimestamp(globalNoteUpdatedAt)}</span>
-                                   </div>
-                                 )}
-                               </div>
-                             ) : (
-                               <div className="rounded border border-dashed border-slate-300 p-3 text-center text-xs text-slate-400 dark:border-slate-700">
-                                 <p>No internal global note for this conversation.</p>
-                                 <button
-                                   type="button"
-                                   onClick={() => {
-                                     setGlobalNoteDraft('');
-                                     setIsEditingGlobalNote(true);
-                                   }}
-                                   className="mt-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
-                                 >
-                                   Click to add note
-                                 </button>
-                               </div>
-                             )}
-                           </div>
-                         )}
-                       </div>
-                     )}
-                   </div>
-                 )}
-
 
                  {/* Conversation Properties */}
                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">

@@ -17,6 +17,14 @@ class MessageCreate(BaseModel):
     client_message_id: Optional[str] = Field(default=None, max_length=100)
 
 
+class MessageEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=10000)
+
+
+class MessageRetract(BaseModel):
+    reason: Optional[str] = None
+
+
 class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -32,6 +40,10 @@ class MessageResponse(BaseModel):
     client_message_id: Optional[str] = None
     ai_metadata: Optional[dict] = None
     created_at: datetime
+    edited_at: Optional[datetime] = None
+    edited_by_id: Optional[int] = None
+    is_retracted: bool = False
+    retracted_at: Optional[datetime] = None
 
 
 class ConversationUpdate(BaseModel):
