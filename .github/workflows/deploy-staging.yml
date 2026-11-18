@@ -69,11 +69,22 @@ jobs:
             ${{ env.FRONTEND_REPO }}:${{ steps.image-meta.outputs.tag }}
             ${{ env.FRONTEND_REPO }}:staging-latest
 
-      - name: Deploy to ECS Staging Services
+      - name: Deploy to ECS Staging Services (Immutable Image Tag)
         run: |
           CLUSTER_NAME="openchat-staging-cluster"
-          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-staging-backend" --force-new-deployment
-          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-staging-frontend" --force-new-deployment
+          IMAGE_TAG="${{ steps.image-meta.outputs.tag }}"
+          
+          # Update Backend Task Definition with immutable image tag
+          BACKEND_DEF=$(aws ecs describe-task-definition --task-definition openchat-staging-backend --query taskDefinition)
+          NEW_BACKEND_DEF=$(echo "$BACKEND_DEF" | jq --arg IMAGE "${{ env.BACKEND_REPO }}:$IMAGE_TAG" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          NEW_BACKEND_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_BACKEND_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-staging-backend" --task-definition "$NEW_BACKEND_ARN"
+          
+          # Update Frontend Task Definition with immutable image tag
+          FRONTEND_DEF=$(aws ecs describe-task-definition --task-definition openchat-staging-frontend --query taskDefinition)
+          NEW_FRONTEND_DEF=$(echo "$FRONTEND_DEF" | jq --arg IMAGE "${{ env.FRONTEND_REPO }}:$IMAGE_TAG" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          NEW_FRONTEND_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_FRONTEND_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-staging-frontend" --task-definition "$NEW_FRONTEND_ARN"
 
       - name: Wait for Staging Services Stabilization
         run: |

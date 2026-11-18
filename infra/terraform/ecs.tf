@@ -114,7 +114,7 @@ resource "aws_ecs_task_definition" "backend" {
 resource "aws_ecs_service" "backend" {
   name                              = "${var.project_name}-${var.environment}-backend"
   cluster                           = aws_ecs_cluster.main.id
-  task_definition                  = aws_ecs_task_definition.backend.arn
+  task_definition                   = aws_ecs_task_definition.backend.arn
   desired_count                     = var.backend_desired_count
   launch_type                       = "FARGATE"
   platform_version                  = "LATEST"
@@ -203,7 +203,7 @@ resource "aws_ecs_task_definition" "frontend" {
 resource "aws_ecs_service" "frontend" {
   name                              = "${var.project_name}-${var.environment}-frontend"
   cluster                           = aws_ecs_cluster.main.id
-  task_definition                  = aws_ecs_task_definition.frontend.arn
+  task_definition                   = aws_ecs_task_definition.frontend.arn
   desired_count                     = var.frontend_desired_count
   launch_type                       = "FARGATE"
   platform_version                  = "LATEST"

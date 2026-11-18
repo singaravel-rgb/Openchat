@@ -5,8 +5,8 @@
 # GitHub Actions OIDC Provider
 # Allows GitHub Actions workflows to assume IAM roles without long-lived access keys
 resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
   thumbprint_list = [
     "6938fd4d98bab03fadb97b34396831e3780aea11",
     "1c58a3a8518e8759bf075b76b750d4f8d264fcd3"
@@ -18,6 +18,7 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
 }
 
 # IAM Role assumed by GitHub Actions for CI/CD deployments
+# OIDC trust policy strictly scopes to singaravel-rgb/Openchat and separates staging vs production
 resource "aws_iam_role" "github_actions" {
   name = "${var.project_name}-${var.environment}-github-actions-role"
 
@@ -35,7 +36,14 @@ resource "aws_iam_role" "github_actions" {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
           }
           StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:*"
+            # Staging: only allows jobs in the staging environment or on release branches
+            # Production: strictly restricts assumption to the protected production GitHub environment
+            "token.actions.githubusercontent.com:sub" = var.environment == "production" ? [
+              "repo:${var.github_repo}:environment:production"
+              ] : [
+              "repo:${var.github_repo}:environment:staging",
+              "repo:${var.github_repo}:ref:refs/heads/release/*"
+            ]
           }
         }
       }
@@ -43,7 +51,7 @@ resource "aws_iam_role" "github_actions" {
   })
 
   tags = {
-    Name = "${var.project_name}-github-actions-role"
+    Name = "${var.project_name}-${var.environment}-github-actions-role"
   }
 }
 
@@ -85,11 +93,21 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         ]
       },
       {
-        Sid    = "ECSUpdate"
+        Sid    = "ECSServiceUpdate"
         Effect = "Allow"
         Action = [
           "ecs:DescribeServices",
-          "ecs:UpdateService",
+          "ecs:UpdateService"
+        ]
+        Resource = [
+          aws_ecs_service.backend.id,
+          aws_ecs_service.frontend.id
+        ]
+      },
+      {
+        Sid    = "ECSTasks"
+        Effect = "Allow"
+        Action = [
           "ecs:DescribeTaskDefinition",
           "ecs:RegisterTaskDefinition",
           "ecs:RunTask",

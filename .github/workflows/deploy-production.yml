@@ -114,12 +114,23 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy to ECS Production Services (Zero-Downtime Rolling Update)
+      - name: Deploy to ECS Production Services (Immutable Image Tag & Rolling Update)
         run: |
           CLUSTER_NAME="openchat-production-cluster"
-          echo "Initiating rolling update on production cluster: $CLUSTER_NAME"
-          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-production-backend" --force-new-deployment
-          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-production-frontend" --force-new-deployment
+          DEPLOY_TAG="${{ steps.image-meta.outputs.deploy_tag }}"
+          echo "Deploying to production ECS cluster using immutable image tag: $DEPLOY_TAG"
+          
+          # Update Backend Task Definition with immutable image tag
+          BACKEND_DEF=$(aws ecs describe-task-definition --task-definition openchat-production-backend --query taskDefinition)
+          NEW_BACKEND_DEF=$(echo "$BACKEND_DEF" | jq --arg IMAGE "${{ env.BACKEND_REPO }}:$DEPLOY_TAG" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          NEW_BACKEND_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_BACKEND_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-production-backend" --task-definition "$NEW_BACKEND_ARN"
+          
+          # Update Frontend Task Definition with immutable image tag
+          FRONTEND_DEF=$(aws ecs describe-task-definition --task-definition openchat-production-frontend --query taskDefinition)
+          NEW_FRONTEND_DEF=$(echo "$FRONTEND_DEF" | jq --arg IMAGE "${{ env.FRONTEND_REPO }}:$DEPLOY_TAG" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          NEW_FRONTEND_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_FRONTEND_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-production-frontend" --task-definition "$NEW_FRONTEND_ARN"
 
       - name: Wait for Production Services Stabilization
         run: |

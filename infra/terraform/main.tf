@@ -12,10 +12,13 @@ terraform {
     }
   }
 
-  # In production, use S3 remote state:
+  # Secure Remote State with S3 + DynamoDB Locking
+  # Staging state key:    "staging/terraform.tfstate"
+  # Production state key: "production/terraform.tfstate"
+  # Initialize with:
+  #   terraform init -backend-config="key=${ENVIRONMENT}/terraform.tfstate"
   # backend "s3" {
   #   bucket         = "openchat-terraform-state"
-  #   key            = "production/terraform.tfstate"
   #   region         = "us-east-1"
   #   dynamodb_table = "openchat-terraform-locks"
   #   encrypt        = true
