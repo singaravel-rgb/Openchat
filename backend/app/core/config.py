@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,34 +15,44 @@ class Settings(BaseSettings):
     )
 
     # PostgreSQL
-    postgres_db: str
-    postgres_user: str
-    postgres_password: str
+    postgres_db: str = "openchat"
+    postgres_user: str = "openchat"
+    postgres_password: str = "openchat"
     postgres_host: str = "127.0.0.1"
     postgres_port: int = 5434
 
     # Redis
     redis_host: str = "127.0.0.1"
     redis_port: int = 6379
-    redis_password: str
+    redis_password: str = ""
 
     # Authentication
-    secret_key: str
+    secret_key: str = "production_ready_secret_key_change_in_env_file_32_chars!"
     access_token_expire_minutes: int = 30
     algorithm: str = "HS256"
 
+    # Environment
+    environment: str = "development"
+    allow_localhost_in_production: bool = False
+
     # AI Provider
-    ai_provider: str = "demo"  # demo, openai, anthropic
+    ai_provider: str = "gemini"  # gemini, demo, openai, anthropic
+    gemini_api_key: str | None = None
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
-    ai_model: str = "gpt-4o-mini"
+    ai_model: str = "gemini-flash-lite-latest"
     ai_temperature: float = 0.3
 
     # Agent settings
     default_max_conversations_per_agent: int = 5
 
     # CORS
-    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    ]
 
     # Celery / background tasks
     celery_broker_url: str = "redis://:redispass@127.0.0.1:6379/1"
@@ -80,7 +91,14 @@ class Settings(BaseSettings):
     host_identity_public_key: str | None = None
 
     @property
-    def database_url(self) -> URL:
+    def database_url(self) -> URL | str:
+        db_env = os.environ.get("DATABASE_URL")
+        if db_env:
+            if db_env.startswith("postgres://"):
+                db_env = db_env.replace("postgres://", "postgresql+psycopg://", 1)
+            elif db_env.startswith("postgresql://") and "+psycopg" not in db_env:
+                db_env = db_env.replace("postgresql://", "postgresql+psycopg://", 1)
+            return db_env
         return URL.create(
             "postgresql+psycopg",
             username=self.postgres_user,

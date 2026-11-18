@@ -1,0 +1,123 @@
+{
+  "Step 1": {
+    "url": "http://localhost:8080/test-widget.html",
+    "launcher_visible": true
+  },
+  "Step 4": {
+    "message_id": 2942,
+    "conversation_id": 960,
+    "content": "What are your support hours?"
+  },
+  "Step 5": {
+    "ai_message_id": 2943,
+    "metadata": {
+      "provider": "gemini",
+      "model": "gemini-flash-lite-latest",
+      "latency_ms": 2501,
+      "decision": "answered",
+      "confidence": 0.95,
+      "sources": [
+        {
+          "type": "faq",
+          "id": 2,
+          "title": "What are your support hours?",
+          "excerpt": "Our AI assistant is available 24/7. Human agents are available Monday-Friday, 9 AM - 6 PM UTC. Outside these hours, your message will be queued and an agent will respond on the next business day.",
+          "score": 13.0
+        },
+        {
+          "type": "faq",
+          "id": 1,
+          "title": "How do I contact support?",
+          "excerpt": "You can contact support by clicking the chat widget in the bottom right corner of any page. Our AI assistant will help you immediately, and if needed, connect you with a human agent.",
+          "score": 5.0
+        },
+        {
+          "type": "article",
+          "id": 2,
+          "title": "Understanding Your Invoice",
+          "excerpt": "Breakdown of invoice sections and common billing questions.",
+          "score": 3.0
+        },
+        {
+          "type": "article",
+          "id": 3,
+          "title": "API Authentication Guide",
+          "excerpt": "Complete guide to API authentication, rate limits, and error handling.",
+          "score": 3.0
+        },
+        {
+          "type": "faq",
+          "id": 4,
+          "title": "Can I cancel my subscription?",
+          "excerpt": "Yes, you can cancel your subscription at any time in Settings > Billing. Your access will continue until the end of your current billing period. No refunds are provided for partial periods.",
+          "score": 2.0
+        }
+      ],
+      "knowledge": [
+        {
+          "type": "faq",
+          "id": 2,
+          "title": "What are your support hours?",
+          "excerpt": "Our AI assistant is available 24/7. Human agents are available Monday-Friday, 9 AM - 6 PM UTC. Outside these hours, your message will be queued and an agent will respond on the next business day.",
+          "score": 13.0
+        },
+        {
+          "type": "faq",
+          "id": 1,
+          "title": "How do I contact support?",
+          "excerpt": "You can contact support by clicking the chat widget in the bottom right corner of any page. Our AI assistant will help you immediately, and if needed, connect you with a human agent.",
+          "score": 5.0
+        },
+        {
+          "type": "article",
+          "id": 2,
+          "title": "Understanding Your Invoice",
+          "excerpt": "Breakdown of invoice sections and common billing questions.",
+          "score": 3.0
+        },
+        {
+          "type": "article",
+          "id": 3,
+          "title": "API Authentication Guide",
+          "excerpt": "Complete guide to API authentication, rate limits, and error handling.",
+          "score": 3.0
+        },
+        {
+          "type": "faq",
+          "id": 4,
+          "title": "Can I cancel my subscription?",
+          "excerpt": "Yes, you can cancel your subscription at any time in Settings > Billing. Your access will continue until the end of your current billing period. No refunds are provided for partial periods.",
+          "score": 2.0
+        }
+      ],
+      "escalated": false,
+      "escalation_reason": null
+    }
+  },
+  "Step 6": {
+    "ai_response": "Hello! \n\nOur AI assistant is available 24/7. Human agents are available Monday through Friday, 9 AM to 6 PM UTC. If you message outside of these hours, your message will be queued and an agent will respond on the next business day [Source faq:2]. \n\nPlease let me know if you need anything else!"
+  },
+  "Step 7": {
+    "conversation_id": 961,
+    "status": "assigned",
+    "decision": "escalate",
+    "escalation_reason": "Sensitive or account/billing/security-related request requires human assistance"
+  },
+  "Step 8": {
+    "endpoint": "GET /api/v1/agent/conversations",
+    "assigned_agent": "refine_agent@example.com",
+    "conversation_found": true
+  },
+  "Step 9": {
+    "endpoint": "POST /api/v1/agent/conversations/961/messages",
+    "agent_message_id": 2948,
+    "content": "Hello! This is Refine Agent from Customer Support. I have reviewed your request and successfully processed a full refund to your card."
+  },
+  "Step 10": {
+    "rendered_bubble_text": "Hello! This is Refine Agent from Customer Support. I have reviewed your request and successfully processed a full refund to your card.\n13:55 \u2022 Agent"
+  },
+  "Step 11": {
+    "restored_conversations": 2,
+    "restored_messages": 4
+  }
+}

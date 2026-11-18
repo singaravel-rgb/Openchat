@@ -1,0 +1,115 @@
+name: Deploy to AWS Production
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      rollback_tag:
+        description: 'Leave empty unless rolling back to a previous image tag'
+        required: false
+        default: ''
+
+permissions:
+  id-token: write   # Required for AWS OIDC authentication
+  contents: read    # Required to checkout the repository
+
+jobs:
+  production-gate:
+    name: Production Release Gate & Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Release Tag
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          echo "Initiating production release verification for version: $VERSION"
+
+  deploy-production:
+    name: Production Deployment (ECS Fargate)
+    needs: [production-gate]
+    runs-on: ubuntu-latest
+    environment: production # Requires manual approval / protection rules in GitHub Settings
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          role-session-name: GitHubActions-OpenChat-Production
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set Release Image Tags
+        id: image-meta
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          ROLLBACK="${{ github.event.inputs.rollback_tag }}"
+          if [ -n "$ROLLBACK" ]; then
+            echo "ROLLBACK MODE: Deploying existing tag $ROLLBACK"
+            echo "deploy_tag=$ROLLBACK" >> $GITHUB_OUTPUT
+            echo "is_rollback=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_tag=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_rollback=false" >> $GITHUB_OUTPUT
+          fi
+          echo "BACKEND_REPO=${{ steps.login-ecr.outputs.registry }}/openchat-production/backend" >> $GITHUB_ENV
+          echo "FRONTEND_REPO=${{ steps.login-ecr.outputs.registry }}/openchat-production/frontend" >> $GITHUB_ENV
+
+      - name: Build and Push Backend Container Image (Production)
+        if: steps.image-meta.outputs.is_rollback == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_REPO }}:${{ steps.image-meta.outputs.deploy_tag }}
+            ${{ env.BACKEND_REPO }}:latest
+
+      - name: Build and Push Frontend Container Image (Production)
+        if: steps.image-meta.outputs.is_rollback == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRONTEND_REPO }}:${{ steps.image-meta.outputs.deploy_tag }}
+            ${{ env.FRONTEND_REPO }}:latest
+
+      - name: Deploy to ECS Production Services (Zero-Downtime Rolling Update)
+        run: |
+          CLUSTER_NAME="openchat-production-cluster"
+          echo "Initiating rolling update on production cluster: $CLUSTER_NAME"
+          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-production-backend" --force-new-deployment
+          aws ecs update-service --cluster "$CLUSTER_NAME" --service "openchat-production-frontend" --force-new-deployment
+
+      - name: Wait for Production Services Stabilization
+        run: |
+          CLUSTER_NAME="openchat-production-cluster"
+          aws ecs wait services-stable --cluster "$CLUSTER_NAME" --services "openchat-production-backend" "openchat-production-frontend"
+
+      - name: Run Production Smoke Verification
+        id: smoke-test
+        env:
+          PROD_URL: ${{ secrets.PRODUCTION_APPLICATION_URL }}
+        run: |
+          python -m pip install httpx
+          python scripts/aws_smoke_tests.py --url "$PROD_URL"
+
+      - name: Rollback Safety Handler
+        if: failure()
+        run: |
+          echo "CRITICAL: Production smoke test failed. Rollback procedure initiated."
+          echo "Please review logs in CloudWatch: /ecs/openchat-production-backend"

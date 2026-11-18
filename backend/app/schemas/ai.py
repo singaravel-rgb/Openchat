@@ -10,8 +10,10 @@ class AIConfigUpdate(BaseModel):
     ai_enabled: Optional[bool] = None
     provider: Optional[str] = Field(default=None, max_length=30)
     model: Optional[str] = Field(default=None, max_length=100)
+    gemini_api_key: Optional[str] = Field(default=None, max_length=500)
     openai_api_key: Optional[str] = Field(default=None, max_length=500)
     anthropic_api_key: Optional[str] = Field(default=None, max_length=500)
+    clear_gemini_api_key: bool = False
     clear_openai_api_key: bool = False
     clear_anthropic_api_key: bool = False
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
@@ -41,8 +43,10 @@ class AIConfigResponse(BaseModel):
     escalation_rules: dict[str, Any]
     max_response_length: int
     knowledge_sources: dict[str, Any]
+    has_gemini_api_key: bool = False
     has_openai_api_key: bool
     has_anthropic_api_key: bool
+    gemini_api_key_masked: Optional[str] = None
     openai_api_key_masked: Optional[str] = None
     anthropic_api_key_masked: Optional[str] = None
     provider_available: bool
@@ -56,6 +60,7 @@ class AIConfigResponse(BaseModel):
 class AITestRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
+    gemini_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
 

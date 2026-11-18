@@ -1,0 +1,31 @@
+# ==============================================================================
+# OpenChat AWS Terraform - Example Variables Configuration
+# Copy this file to terraform.tfvars or staging.tfvars / production.tfvars
+# ==============================================================================
+
+aws_region      = "us-east-1"
+environment     = "production" # or "staging"
+project_name    = "openchat"
+github_repo     = "singaravel-rgb/Openchat"
+domain_name     = "openchat.example.com"
+certificate_arn = "" # e.g. "arn:aws:acm:us-east-1:123456789012:certificate/abc-123"
+
+# RDS PostgreSQL Configuration
+db_instance_class = "db.t4g.micro" # Use db.t4g.small or db.r6g.large for high throughput
+db_name           = "openchat"
+db_username       = "openchat_admin"
+
+# Redis Cache Configuration
+redis_node_type   = "cache.t4g.micro"
+
+# ECS Sizing
+backend_cpu            = 512  # 0.5 vCPU
+backend_memory         = 1024 # 1 GB
+backend_desired_count  = 2    # Multi-container high availability
+
+frontend_cpu           = 512  # 0.5 vCPU
+frontend_memory        = 1024 # 1 GB
+frontend_desired_count = 2
+
+# Gemini AI API Key (leave blank to inject manually into AWS Secrets Manager)
+gemini_api_key = ""

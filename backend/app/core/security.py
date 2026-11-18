@@ -16,15 +16,19 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return password_hasher.verify(password, hashed_password)
 
 
-def create_access_token(subject: str) -> str:
-    expires_at = datetime.now(timezone.utc) + timedelta(
+def create_access_token(subject: str, role: str | None = None) -> str:
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(
         minutes=settings.access_token_expire_minutes
     )
 
     payload = {
         "sub": subject,
+        "iat": now.timestamp(),
         "exp": expires_at,
     }
+    if role:
+        payload["role"] = role
 
     return jwt.encode(
         payload,

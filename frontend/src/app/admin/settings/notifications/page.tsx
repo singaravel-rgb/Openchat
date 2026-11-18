@@ -31,13 +31,13 @@ export default function NotificationSettingsPage() {
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/login');
-    } else if (user && user.role !== 'admin') {
+    } else if (user && user.role !== 'admin' && user.role !== 'super_admin') {
       router.push('/agent');
     }
   }, [user, authLoading, router]);
 
   useEffect(() => {
-    if (user && user.role === 'admin') {
+    if (user && (user.role === 'admin' || user.role === 'super_admin')) {
       loadSettings();
     }
   }, [user]);
@@ -122,7 +122,7 @@ export default function NotificationSettingsPage() {
     );
   }
 
-  if (!user || user.role !== 'admin') return null;
+  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return null;
 
   return (
     <div className="space-y-6 max-w-3xl">

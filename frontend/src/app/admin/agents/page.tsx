@@ -107,7 +107,12 @@ export default function AdminAgentsPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Agents</h1>
           <p className="text-slate-500 dark:text-slate-400">Manage support agents and their availability</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>+ Add Agent</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => window.location.href = '/admin/users'}>
+            Manage All Staff & Roles →
+          </Button>
+          <Button onClick={() => setShowCreateModal(true)}>+ Add Agent</Button>
+        </div>
       </div>
 
       {error && (

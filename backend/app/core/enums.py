@@ -11,6 +11,7 @@ class ConversationStatus(StrEnum):
     ASSIGNED = "assigned"
     AI_HANDLING = "ai_handling"
     CLOSED = "closed"
+    MERGED = "merged"
 
 
 class MessageSenderType(StrEnum):

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenChat Widget Test Page</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #f1f5f9;
+      color: #0f172a;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .header {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      padding: 20px 24px;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      margin-bottom: 20px;
+    }
+    h1 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 22px;
+      color: #1e293b;
+    }
+    p {
+      color: #475569;
+      line-height: 1.5;
+      margin: 4px 0;
+      font-size: 14px;
+    }
+    .diag-panel {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+    }
+    .diag-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+    }
+    .diag-title {
+      font-weight: 600;
+      font-size: 16px;
+      color: #0f172a;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .badge-success { background: #dcfce7; color: #166534; }
+    .badge-warning { background: #fef9c3; color: #854d0e; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .stat-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .stat-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      word-break: break-all;
+    }
+    .log-box {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      max-height: 160px;
+      overflow-y: auto;
+      line-height: 1.4;
+    }
+    .log-line {
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+    .log-time {
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>OpenChat Standalone Widget Test Page</h1>
+      <p>This test page embeds the standalone customer widget script inside an isolated Shadow DOM container with fixed 24px viewport anchoring.</p>
+      <p>Look at the bottom-right corner for the blue floating chat launcher button.</p>
+    </div>
+
+    <!-- Diagnostic Panel -->
+    <div class="diag-panel">
+      <div class="diag-header">
+        <div class="diag-title">Widget Viewport &amp; Positioning Diagnostics</div>
+        <span id="diag-main-status" class="badge badge-warning">Checking</span>
+      </div>
+
+      <div class="grid">
+        <div class="stat-card">
+          <div class="stat-label">Viewport Dimensions</div>
+          <div id="stat-viewport" class="stat-value">Checking...</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Launcher Bounding Rect</div>
+          <div id="stat-rect" class="stat-value">Checking...</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Inside Viewport?</div>
+          <div id="stat-inside" class="stat-value">Checking...</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Visually Visible?</div>
+          <div id="stat-visible" class="stat-value">Checking...</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Edge Spacing</div>
+          <div id="stat-spacing" class="stat-value">Checking...</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Shadow DOM Architecture</div>
+          <div id="stat-shadow" class="stat-value">Active (Isolated)</div>
+        </div>
+      </div>
+
+      <div class="stat-label" style="margin-bottom: 6px;">Live Diagnostics Log:</div>
+      <div id="log-box" class="log-box">
+        <div class="log-line">Waiting for widget script...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function updateDiagUI(d) {
+      if (!d) return;
+      var mainStatus = document.getElementById('diag-main-status');
+      var statViewport = document.getElementById('stat-viewport');
+      var statRect = document.getElementById('stat-rect');
+      var statInside = document.getElementById('stat-inside');
+      var statVisible = document.getElementById('stat-visible');
+      var statSpacing = document.getElementById('stat-spacing');
+      var logBox = document.getElementById('log-box');
+
+      var winW = window.innerWidth;
+      var winH = window.innerHeight;
+      statViewport.textContent = winW + ' × ' + winH + ' px';
+
+      // Find launcher inside Shadow DOM or regular DOM
+      var rootHost = document.getElementById('openchat-widget-root');
+      var shadow = (rootHost && rootHost.shadowRoot) || window.__openchatShadowRoot;
+      var launcher = (shadow ? shadow.querySelector('#ocw-launch') : null) || document.querySelector('#ocw-launch');
+
+      if (launcher) {
+        var rect = launcher.getBoundingClientRect();
+        var style = window.getComputedStyle(launcher);
+        var isInside = (rect.top >= 0 && rect.left >= 0 && rect.bottom <= winH && rect.right <= winW && rect.width > 0 && rect.height > 0);
+        var isVis = isInside && style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity || '1') > 0;
+        var spacingBottom = Math.round(winH - rect.bottom);
+        var spacingRight = Math.round(winW - rect.right);
+
+        statRect.textContent = Math.round(rect.width) + '×' + Math.round(rect.height) + ' (T:' + Math.round(rect.top) + ', L:' + Math.round(rect.left) + ')';
+        statInside.textContent = isInside ? 'YES (100% Inside)' : 'NO (Clipped / Outside)';
+        statInside.style.color = isInside ? '#16a34a' : '#dc2626';
+
+        statVisible.textContent = isVis ? 'YES (Visible)' : 'NO (Hidden)';
+        statVisible.style.color = isVis ? '#16a34a' : '#dc2626';
+
+        statSpacing.textContent = 'Bottom: ' + spacingBottom + 'px, Right: ' + spacingRight + 'px';
+
+        if (isVis) {
+          mainStatus.textContent = 'Launcher Visible';
+          mainStatus.className = 'badge badge-success';
+        } else {
+          mainStatus.textContent = 'Launcher Hidden';
+          mainStatus.className = 'badge badge-danger';
+        }
+      } else if (shadow && shadow.querySelector('.ocw-panel')) {
+        mainStatus.textContent = 'Chat Panel Open';
+        mainStatus.className = 'badge badge-success';
+        statVisible.textContent = 'Panel Open';
+      }
+
+      if (d.logs && d.logs.length) {
+        var html = '';
+        d.logs.slice(-15).forEach(function(l) {
+          var t = l.time.split('T')[1].slice(0, 8);
+          var detail = l.data ? ' ' + JSON.stringify(l.data) : (l.error ? ' ERROR: ' + l.error : '');
+          html += '<div class="log-line"><span class="log-time">[' + t + ']</span> ' + l.stage + detail + '</div>';
+        });
+        logBox.innerHTML = html;
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+    }
+
+    window.__onOpenChatDiagUpdate = updateDiagUI;
+
+    setInterval(function(){
+      if (window.__openchatDiagnostics) {
+        updateDiagUI(window.__openchatDiagnostics);
+      }
+    }, 400);
+  </script>
+
+  <!-- Load OpenChat Widget Standalone Bundle -->
+  <script src="openchat-widget.js" data-backend-url="http://localhost:8000" async></script>
+</body>
+</html>

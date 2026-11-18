@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import ArticleStatus, ArticleVisibility
 from app.db.base import Base
+from app.models.user import User
 
 
 class Category(Base):

@@ -6,7 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from app.core.config import settings
 from app.db.base import Base
 from app.models.user import User
-from app.models.conversation import Conversation
+from app.models.conversation import Conversation, ConversationLink
 from app.models.message import Message
 from app.models.agent_profile import AgentProfile
 from app.models.csat import CSATRating
@@ -33,14 +33,19 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-config.set_main_option(
-    "sqlalchemy.url",
-    settings.database_url.render_as_string(hide_password=False).replace("%", "%%"),
-)
+custom_url = config.get_main_option("sqlalchemy.url")
+db_url_obj = settings.database_url
+db_url_rendered = db_url_obj.render_as_string(hide_password=False) if hasattr(db_url_obj, "render_as_string") else str(db_url_obj)
+
+if not custom_url or "driver://user:pass@localhost/dbname" in custom_url:
+    config.set_main_option(
+        "sqlalchemy.url",
+        db_url_rendered.replace("%", "%%"),
+    )
 
 
 def run_migrations_offline() -> None:
-    url = settings.database_url.render_as_string(hide_password=False)
+    url = config.get_main_option("sqlalchemy.url") or db_url_rendered
 
     context.configure(
         url=url,

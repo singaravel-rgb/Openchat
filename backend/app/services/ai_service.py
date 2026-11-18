@@ -60,7 +60,10 @@ COMPLEX_PATTERNS = [
 ]
 
 PRICING_RATES = {
-    # rough demo/reference estimates per 1M tokens (input, output)
+    # Reference estimates per 1M tokens (input, output)
+    "gemini:gemini-flash-lite-latest": (0.0375, 0.15),
+    "gemini:gemini-flash-latest": (0.075, 0.30),
+    "gemini:gemini-pro-latest": (0.50, 1.50),
     "openai:gpt-4o-mini": (0.15, 0.60),
     "openai:gpt-4o": (2.50, 10.00),
     "anthropic:claude-3-5-sonnet": (3.00, 15.00),
@@ -107,8 +110,8 @@ class AIProcessingResult:
 @dataclass
 class RuntimeAIConfig:
     ai_enabled: bool = True
-    provider: str = "demo"
-    model: str = "gpt-4o-mini"
+    provider: str = "gemini"
+    model: str = "gemini-flash-lite-latest"
     temperature: float = 0.3
     max_tokens: int = 500
     system_instructions: str = DEFAULT_SYSTEM
@@ -119,6 +122,7 @@ class RuntimeAIConfig:
     escalation_rules: dict[str, Any] = field(default_factory=dict)
     max_response_length: int = 1200
     knowledge_sources: dict[str, Any] = field(default_factory=lambda: {"faqs": True, "articles": True})
+    gemini_api_key: str | None = None
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
 
@@ -133,8 +137,8 @@ def get_or_create_ai_config(db: Session) -> AIConfig:
         return cfg
     cfg = AIConfig(
         ai_enabled=True,
-        provider=getattr(settings, "ai_provider", "demo") or "demo",
-        model=getattr(settings, "ai_model", "gpt-4o-mini") or "gpt-4o-mini",
+        provider=getattr(settings, "ai_provider", "gemini") or "gemini",
+        model=getattr(settings, "ai_model", "gemini-flash-latest") or "gemini-flash-latest",
         temperature=float(getattr(settings, "ai_temperature", 0.3) or 0.3),
         max_tokens=500,
         system_instructions=DEFAULT_SYSTEM,
@@ -163,8 +167,8 @@ def to_runtime_config(cfg: AIConfig) -> RuntimeAIConfig:
     langs = [str(x) for x in (cfg.supported_languages or ["en"]) if str(x).strip()] or ["en"]
     return RuntimeAIConfig(
         ai_enabled=bool(cfg.ai_enabled),
-        provider=(cfg.provider or "demo").strip().lower(),
-        model=(cfg.model or "gpt-4o-mini").strip(),
+        provider=(cfg.provider or "gemini").strip().lower(),
+        model=(cfg.model or "gemini-flash-latest").strip(),
         temperature=float(cfg.temperature if cfg.temperature is not None else 0.3),
         max_tokens=int(cfg.max_tokens or 500),
         system_instructions=(cfg.system_instructions or DEFAULT_SYSTEM).strip() or DEFAULT_SYSTEM,
@@ -175,6 +179,7 @@ def to_runtime_config(cfg: AIConfig) -> RuntimeAIConfig:
         escalation_rules=rules,
         max_response_length=int(cfg.max_response_length or 1200),
         knowledge_sources=ks,
+        gemini_api_key=decrypt_secret(getattr(cfg, "gemini_api_key_encrypted", None)) or getattr(settings, "gemini_api_key", None),
         openai_api_key=decrypt_secret(getattr(cfg, "openai_api_key_encrypted", None)) or getattr(settings, "openai_api_key", None),
         anthropic_api_key=decrypt_secret(getattr(cfg, "anthropic_api_key_encrypted", None)) or getattr(settings, "anthropic_api_key", None),
     )
@@ -352,7 +357,10 @@ def record_ai_usage(db: Session, *, conversation_id: int | None, message_id: int
             decision=decision,
         )
         db.add(log)
+        db.commit()
+        db.refresh(log)
     except Exception:
+        db.rollback()
         logger.exception("Failed to record AI usage log")
 
 
@@ -399,54 +407,115 @@ def _build_provider_messages(runtime: RuntimeAIConfig, conversation: Conversatio
 
 
 async def _call_openai(runtime: RuntimeAIConfig, system: str, history: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
-    if not runtime.openai_api_key:
+    key = (runtime.openai_api_key or "").strip()
+    if not key:
         raise RuntimeError("OpenAI API key is not configured")
-    try:
-        from openai import AsyncOpenAI
-    except Exception as e:
-        raise RuntimeError("openai package is not installed") from e
-    client = AsyncOpenAI(api_key=runtime.openai_api_key, timeout=20.0, max_retries=1)
-    resp = await client.chat.completions.create(
-        model=runtime.model,
-        temperature=float(runtime.temperature),
-        max_tokens=int(runtime.max_tokens),
-        messages=[{"role": "system", "content": system}, *history],
-    )
-    text = (resp.choices[0].message.content or "").strip()
-    usage = getattr(resp, "usage", None)
-    usage_d = {
-        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
-        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
-        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+
+    import httpx
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
     }
-    return text, usage_d
+    payload = {
+        "model": runtime.model or "gpt-4o-mini",
+        "temperature": float(runtime.temperature if runtime.temperature is not None else 0.3),
+        "max_tokens": int(runtime.max_tokens if runtime.max_tokens is not None else 1000),
+        "messages": [{"role": "system", "content": system}, *history],
+    }
+
+    last_err = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                data = resp.json()
+                if resp.status_code == 200:
+                    text = (data["choices"][0]["message"]["content"] or "").strip()
+                    usage = data.get("usage", {})
+                    usage_d = {
+                        "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                        "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                        "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                    }
+                    return text, usage_d
+                elif resp.status_code == 401:
+                    err_msg = data.get("error", {}).get("message", "Incorrect or invalid OpenAI API key")
+                    raise RuntimeError(f"OpenAI Authentication Error (401): {err_msg}")
+                elif resp.status_code == 429:
+                    err_msg = data.get("error", {}).get("message", "OpenAI rate limit or quota exceeded")
+                    raise RuntimeError(f"OpenAI Rate Limit Error (429): {err_msg}")
+                else:
+                    err_msg = data.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                    raise RuntimeError(f"OpenAI API Error ({resp.status_code}): {err_msg}")
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            last_err = e
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+                continue
+            raise RuntimeError(f"OpenAI API network timeout: {e}") from e
+    if last_err:
+        raise RuntimeError(f"OpenAI API failed: {last_err}") from last_err
+    raise RuntimeError("OpenAI API call failed without response")
 
 
 async def _call_anthropic(runtime: RuntimeAIConfig, system: str, history: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
-    if not runtime.anthropic_api_key:
+    key = (runtime.anthropic_api_key or "").strip()
+    if not key:
         raise RuntimeError("Anthropic API key is not configured")
-    try:
-        from anthropic import AsyncAnthropic
-    except Exception as e:
-        raise RuntimeError("anthropic package is not installed") from e
-    client = AsyncAnthropic(api_key=runtime.anthropic_api_key, timeout=20.0, max_retries=1)
-    resp = await client.messages.create(
-        model=runtime.model,
-        system=system,
-        temperature=float(runtime.temperature),
-        max_tokens=int(runtime.max_tokens),
-        messages=history,
-    )
-    text = ""
-    for block in (getattr(resp, "content", None) or []):
-        if getattr(block, "type", None) == "text":
-            text += getattr(block, "text", "") or ""
-        elif isinstance(block, dict) and block.get("type") == "text":
-            text += block.get("text", "")
-    usage = getattr(resp, "usage", None)
-    prompt = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
-    completion = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
-    return text.strip(), {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
+
+    import httpx
+    url = "https://api.anthropic.com/v1/messages"
+    headers = {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": runtime.model or "claude-3-haiku-20240307",
+        "system": system,
+        "temperature": float(runtime.temperature if runtime.temperature is not None else 0.3),
+        "max_tokens": int(runtime.max_tokens if runtime.max_tokens is not None else 1000),
+        "messages": history,
+    }
+
+    last_err = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                data = resp.json()
+                if resp.status_code == 200:
+                    text = ""
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            text += block.get("text", "")
+                    usage = data.get("usage", {})
+                    prompt = int(usage.get("input_tokens", 0) or 0)
+                    completion = int(usage.get("output_tokens", 0) or 0)
+                    return text.strip(), {
+                        "prompt_tokens": prompt,
+                        "completion_tokens": completion,
+                        "total_tokens": prompt + completion,
+                    }
+                elif resp.status_code == 401:
+                    err_msg = data.get("error", {}).get("message", "Incorrect or invalid Anthropic API key")
+                    raise RuntimeError(f"Anthropic Authentication Error (401): {err_msg}")
+                elif resp.status_code == 429:
+                    err_msg = data.get("error", {}).get("message", "Anthropic rate limit or quota exceeded")
+                    raise RuntimeError(f"Anthropic Rate Limit Error (429): {err_msg}")
+                else:
+                    err_msg = data.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                    raise RuntimeError(f"Anthropic API Error ({resp.status_code}): {err_msg}")
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            last_err = e
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+                continue
+            raise RuntimeError(f"Anthropic API network timeout: {e}") from e
+    if last_err:
+        raise RuntimeError(f"Anthropic API failed: {last_err}") from last_err
+    raise RuntimeError("Anthropic API call failed without response")
 
 
 async def _call_demo(runtime: RuntimeAIConfig, system: str, history: list[dict[str, str]], knowledge_hits: list[KnowledgeHit], last_user: str) -> tuple[str, dict[str, Any]]:
@@ -474,8 +543,94 @@ async def _call_demo(runtime: RuntimeAIConfig, system: str, history: list[dict[s
     return f"[DEMO AI] {answer}", {"prompt_tokens": p, "completion_tokens": c, "total_tokens": p + c}
 
 
+async def _call_gemini(runtime: RuntimeAIConfig, system: str, history: list[dict[str, str]]) -> tuple[str, dict[str, Any]]:
+    key = (runtime.gemini_api_key or "").strip()
+    if not key:
+        raise RuntimeError("Google Gemini API key is not configured")
+
+    import httpx
+    model = (runtime.model or "gemini-flash-latest").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers = {
+        "x-goog-api-key": key,
+        "Content-Type": "application/json",
+    }
+
+    # Format history for Gemini contents (roles: 'user' or 'model')
+    contents: list[dict[str, Any]] = []
+    for m in history:
+        role = "model" if m.get("role") in ("assistant", "model") else "user"
+        content_text = (m.get("content") or "").strip() or "Hello"
+        if contents and contents[-1]["role"] == role:
+            contents[-1]["parts"][0]["text"] += f"\n{content_text}"
+        else:
+            contents.append({"role": role, "parts": [{"text": content_text}]})
+
+    if not contents:
+        contents = [{"role": "user", "parts": [{"text": "Hello"}]}]
+    elif contents[0]["role"] == "model":
+        contents.insert(0, {"role": "user", "parts": [{"text": "Hello"}]})
+
+    payload: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": float(runtime.temperature if runtime.temperature is not None else 0.3),
+            "maxOutputTokens": int(runtime.max_tokens if runtime.max_tokens is not None else 1000),
+        },
+    }
+    if system and system.strip():
+        payload["system_instruction"] = {"parts": [{"text": system.strip()}]}
+
+    last_err = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                data = resp.json()
+                if resp.status_code == 200:
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        raise RuntimeError("Gemini returned an empty candidate list")
+                    first_cand = candidates[0]
+                    parts = first_cand.get("content", {}).get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p).strip()
+                    usage_meta = data.get("usageMetadata", {})
+                    prompt_tokens = int(usage_meta.get("promptTokenCount", 0) or 0)
+                    completion_tokens = int(usage_meta.get("candidatesTokenCount", 0) or 0)
+                    total_tokens = int(usage_meta.get("totalTokenCount", 0) or (prompt_tokens + completion_tokens))
+                    return text, {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    }
+                else:
+                    err_info = data.get("error", {})
+                    err_code = err_info.get("code", resp.status_code)
+                    err_msg = err_info.get("message", f"HTTP {resp.status_code}")
+                    details = err_info.get("details", [])
+                    reasons = [d.get("reason") for d in details if isinstance(d, dict) and "reason" in d]
+                    if resp.status_code in (401, 403) or "API_KEY_INVALID" in reasons or "API key not valid" in err_msg:
+                        raise RuntimeError(f"Gemini Authentication Error: {err_msg}")
+                    elif resp.status_code == 429 or "RESOURCE_EXHAUSTED" in reasons or "quota" in err_msg.lower():
+                        raise RuntimeError(f"Gemini Rate Limit Error (429): {err_msg}")
+                    else:
+                        raise RuntimeError(f"Gemini API Error ({err_code}): {err_msg}")
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            last_err = e
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+                continue
+            raise RuntimeError(f"Gemini API network timeout: {e}") from e
+    if last_err:
+        raise RuntimeError(f"Gemini API failed: {last_err}") from last_err
+    raise RuntimeError("Gemini API call failed without response")
+
+
 async def generate_with_provider(runtime: RuntimeAIConfig, system: str, history: list[dict[str, str]], knowledge_hits: list[KnowledgeHit], last_user: str) -> tuple[str, dict[str, Any], str]:
-    provider = (runtime.provider or "demo").lower()
+    provider = (runtime.provider or "gemini").lower()
+    if provider == "gemini":
+        text, usage = await _call_gemini(runtime, system, history)
+        return text, usage, "gemini"
     if provider == "openai":
         text, usage = await _call_openai(runtime, system, history)
         return text, usage, "openai"
@@ -486,10 +641,35 @@ async def generate_with_provider(runtime: RuntimeAIConfig, system: str, history:
     return text, usage, "demo"
 
 
+UNCONFIRMED_ACTION_PATTERNS = [
+    (r"\b(i have|i've|we have|we've)\s+(successfully\s+)?(processed|issued|reversed|approved|sent|completed)\s+(a\s+|your\s+|the\s+)?(full\s+|partial\s+)?(refund|chargeback|reversal|credit|payment)\b[^\.\n]*", 
+     "I have recorded your request. A support agent will review your account and assist with submitting this for processing."),
+    (r"\b(your\s+)?(refund|chargeback|reversal|payment)\s+(has been|is|was)\s+(successfully\s+)?(processed|issued|approved|completed|sent)\b[^\.\n]*",
+     "Your request has been received. A support agent will review your account and assist with processing."),
+    (r"\b(i have|i've|we have|we've)\s+(successfully\s+)?(cancelled|canceled|terminated|closed|deleted)\s+(your\s+|the\s+)?(subscription|account|plan|membership)\b[^\.\n]*",
+     "I have recorded your request. A support agent will review your account and assist with this change."),
+    (r"\b(your\s+)?(subscription|account|plan|membership)\s+(has been|is|was)\s+(successfully\s+)?(cancelled|canceled|terminated|closed|deleted)\b[^\.\n]*",
+     "Your request has been received. A support agent will review your account and assist with this change."),
+    (r"\b(i have|i've|we have|we've)\s+(successfully\s+)?(booked|reserved|scheduled)\s+[^\.\n]*",
+     "I have recorded your request. A support agent will review and assist with confirmation."),
+]
+
+
+def enforce_action_claim_safety(text: str) -> str:
+    cleaned = text
+    for pattern, replacement in UNCONFIRMED_ACTION_PATTERNS:
+        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
 def _validate_output(text: str, runtime: RuntimeAIConfig, knowledge_hits: list[KnowledgeHit]) -> tuple[str, bool, str | None]:
     cleaned = _sanitize_user_text(text)
     if not cleaned:
         return "I don't have enough verified information to answer that right now. I can connect you with a human agent for help.", True, "abstain"
+
+    # Enforce action-claim safety: never claim unconfirmed actions (refunds, cancellations, deletions) were completed
+    cleaned = enforce_action_claim_safety(cleaned)
+
     # prevent fabricated certainty / policy actions
     if not knowledge_hits and not re.search(r"(clarify|more detail|human agent|support agent|don't have enough|not enough verified)", cleaned.lower()):
         cleaned = (
@@ -544,6 +724,21 @@ async def process_ai_turn(
         summary = build_handoff_summary(conversation, public_messages, reason, [])
         answer = "I understand you'd like to speak with a human agent. I'm connecting you now."
         latency = int((time.perf_counter() - started) * 1000)
+        record_ai_usage(
+            db,
+            conversation_id=conversation.id if conversation else None,
+            message_id=None,
+            provider=runtime.provider,
+            model=runtime.model,
+            prompt_tokens=estimate_tokens(last_customer),
+            completion_tokens=estimate_tokens(answer),
+            total_tokens=estimate_tokens(last_customer) + estimate_tokens(answer),
+            estimated_cost_usd=0.0,
+            latency_ms=latency,
+            success=True,
+            error_message=None,
+            decision="handoff_requested",
+        )
         return AIProcessingResult(answer, True, reason, "handoff_requested", 1.0, [], {}, runtime.provider, runtime.model, latency, summary)
 
     # prompt injection / abuse -> do not comply, continue safely or escalate
@@ -556,7 +751,23 @@ async def process_ai_turn(
         if sensitive:
             reason = sreason or reason
         latency = int((time.perf_counter() - started) * 1000)
-        return AIProcessingResult(answer, sensitive, reason if sensitive else None, "escalate" if sensitive else "clarify", 0.2, [], {}, runtime.provider, runtime.model, latency, summary if sensitive else None)
+        dec = "escalate" if sensitive else "clarify"
+        record_ai_usage(
+            db,
+            conversation_id=conversation.id if conversation else None,
+            message_id=None,
+            provider=runtime.provider,
+            model=runtime.model,
+            prompt_tokens=estimate_tokens(last_customer),
+            completion_tokens=estimate_tokens(answer),
+            total_tokens=estimate_tokens(last_customer) + estimate_tokens(answer),
+            estimated_cost_usd=0.0,
+            latency_ms=latency,
+            success=True,
+            error_message=None,
+            decision=dec,
+        )
+        return AIProcessingResult(answer, sensitive, reason if sensitive else None, dec, 0.2, [], {}, runtime.provider, runtime.model, latency, summary if sensitive else None)
 
     sensitive, sreason = detect_sensitive_or_restricted(last_customer, runtime.escalation_rules)
     if sensitive:
@@ -564,6 +775,21 @@ async def process_ai_turn(
         summary = build_handoff_summary(conversation, public_messages, reason, [])
         answer = "This request involves a sensitive or account-specific action that requires human assistance. I'm connecting you with a support agent now."
         latency = int((time.perf_counter() - started) * 1000)
+        record_ai_usage(
+            db,
+            conversation_id=conversation.id if conversation else None,
+            message_id=None,
+            provider=runtime.provider,
+            model=runtime.model,
+            prompt_tokens=estimate_tokens(last_customer),
+            completion_tokens=estimate_tokens(answer),
+            total_tokens=estimate_tokens(last_customer) + estimate_tokens(answer),
+            estimated_cost_usd=0.0,
+            latency_ms=latency,
+            success=True,
+            error_message=None,
+            decision="escalate",
+        )
         return AIProcessingResult(answer, True, reason, "escalate", 1.0, [], {}, runtime.provider, runtime.model, latency, summary)
 
     knowledge_hits = retrieve_knowledge_hits(db, last_customer, limit=5, sources=runtime.knowledge_sources)
@@ -581,21 +807,30 @@ async def process_ai_turn(
     try:
         text, usage, provider_used = await asyncio.wait_for(
             generate_with_provider(runtime, system, history, knowledge_hits, last_customer),
-            timeout=20.0,
+            timeout=35.0,
         )
         model_used = runtime.model if provider_used != "demo" else "demo"
     except Exception as e:
         logger.exception("AI provider call failed")
         error = str(e)
-        # safe fallback: try demo if configured provider failed
-        try:
-            runtime_demo = RuntimeAIConfig(**{**runtime.__dict__, "provider": "demo", "model": "demo"})
-            text, usage, provider_used = await _call_demo(runtime_demo, system, history, knowledge_hits, last_customer)
-            model_used = "demo-fallback"
-        except Exception:
-            text = "I'm having trouble responding right now. I'll connect you with a support agent so you can get help."
+        if (runtime.provider or "demo").lower() == "demo":
+            # safe fallback: try demo if configured provider was demo
+            try:
+                runtime_demo = RuntimeAIConfig(**{**runtime.__dict__, "provider": "demo", "model": "demo"})
+                text, usage, provider_used = await _call_demo(runtime_demo, system, history, knowledge_hits, last_customer)
+                model_used = "demo-fallback"
+            except Exception:
+                text = "I'm having trouble responding right now. I'll connect you with a support agent so you can get help."
+                usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                provider_used = "demo"
+                model_used = "demo"
+        else:
+            # REAL PROVIDER FAILED OR NOT CONFIGURED:
+            # As required: "If no valid API key is configured, show a clear provider configuration error. Never pretend a demo response is a real AI response. Verify provider errors, timeouts, retries, latency and token/cost tracking."
+            p_name = "Google Gemini" if runtime.provider.lower() == "gemini" else runtime.provider.capitalize()
+            text = f"I am unable to process your request using our {p_name} AI service ({error}). I am connecting you with a human support agent who will assist you directly."
             usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            provider_used = runtime.provider or "demo"
+            provider_used = runtime.provider
             model_used = runtime.model
 
     # compute confidence heuristic
@@ -612,7 +847,12 @@ async def process_ai_turn(
     should_escalate = False
     reason = None
 
-    if error and provider_used == (runtime.provider or "demo") and "having trouble responding" in validated.lower():
+    if error and provider_used != "demo":
+        should_escalate = True
+        decision = "escalate"
+        reason = f"AI provider '{runtime.provider}' error: {error}"
+        validated = text
+    elif error and "having trouble responding" in validated.lower():
         should_escalate = True
         decision = "escalate"
         reason = f"AI provider error: {error}"
@@ -657,6 +897,23 @@ async def process_ai_turn(
         if custom_fallback and custom_fallback.strip():
             validated = custom_fallback.strip()
 
+    # Record AI usage log
+    record_ai_usage(
+        db,
+        conversation_id=conversation.id if conversation else None,
+        message_id=None,
+        provider=provider_used,
+        model=model_used,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        estimated_cost_usd=cost,
+        latency_ms=latency,
+        success=(error is None),
+        error_message=error,
+        decision=decision,
+    )
+
     return AIProcessingResult(
         answer=validated,
         should_escalate=should_escalate,
@@ -687,13 +944,18 @@ class AIProvider:
         try:
             runtime = to_runtime_config(get_or_create_ai_config(db))
             result = await process_ai_turn(db, conversation, messages, customer, runtime=runtime)
+            db.commit()
             return result.answer, result.should_escalate, result.escalation_reason
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
 
 # expose names used by existing code
 DemoAIProvider = AIProvider
+GeminiAIProvider = AIProvider
 OpenAIProvider = AIProvider
 AnthropicProvider = AIProvider
 

@@ -5,11 +5,12 @@ from sqlalchemy import func, or_, and_, distinct
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
-from app.models.conversation import Conversation, ConversationStatus
+from app.models.conversation import Conversation, ConversationStatus, ConversationLink
 from app.models.message import Message, MessageType, MessageSenderType
 from app.models.user import User
 from app.models.agent_profile import AgentProfile
 from app.models.ai import AIConfig
+from app.models.audit_log import AuditLog
 from app.schemas.conversation import ConversationCreate, ConversationUpdate
 from app.services.sla_service import apply_sla_to_conversation
 
@@ -36,18 +37,53 @@ def list_conversations_query(
         query = query.filter(Conversation.customer_id == viewer.id)
     elif viewer.role == "agent":
         if queue == "inbox":
-            query = query.filter(Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]))
+            query = query.filter(
+                or_(
+                    and_(
+                        Conversation.assigned_agent_id == viewer.id,
+                        Conversation.status.in_([
+                            ConversationStatus.OPEN,
+                            ConversationStatus.ASSIGNED,
+                            ConversationStatus.PENDING,
+                            ConversationStatus.AI_HANDLING,
+                            ConversationStatus.WAITING_ON_CUSTOMER,
+                            ConversationStatus.ON_HOLD,
+                        ]),
+                    ),
+                    and_(
+                        Conversation.assigned_agent_id.is_(None),
+                        Conversation.status.in_([
+                            ConversationStatus.OPEN,
+                            ConversationStatus.ASSIGNED,
+                            ConversationStatus.PENDING,
+                            ConversationStatus.AI_HANDLING,
+                        ]),
+                    ),
+                )
+            )
         elif queue == "pending":
             query = query.filter(Conversation.status == ConversationStatus.PENDING)
         elif queue == "assigned":
             query = query.filter(
                 Conversation.assigned_agent_id == viewer.id,
-                Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),
+                Conversation.status.in_([
+                    ConversationStatus.OPEN,
+                    ConversationStatus.ASSIGNED,
+                    ConversationStatus.PENDING,
+                    ConversationStatus.AI_HANDLING,
+                    ConversationStatus.WAITING_ON_CUSTOMER,
+                    ConversationStatus.ON_HOLD,
+                ]),
             )
         elif queue == "unassigned":
             query = query.filter(
                 Conversation.assigned_agent_id.is_(None),
-                Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]),
+                Conversation.status.in_([
+                    ConversationStatus.OPEN,
+                    ConversationStatus.ASSIGNED,
+                    ConversationStatus.PENDING,
+                    ConversationStatus.AI_HANDLING,
+                ]),
             )
         elif queue == "resolved":
             query = query.filter(
@@ -55,21 +91,37 @@ def list_conversations_query(
                 Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]),
             )
         else:
-            query = query.filter(or_(
-                Conversation.assigned_agent_id == viewer.id,
-                Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]),
-            ))
-    else:  # admin
+            query = query.filter(
+                or_(
+                    Conversation.assigned_agent_id == viewer.id,
+                    Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]),
+                )
+            )
+    else:  # admin / super_admin
         if queue == "inbox":
-            query = query.filter(Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]))
+            query = query.filter(
+                Conversation.status.in_([
+                    ConversationStatus.OPEN,
+                    ConversationStatus.ASSIGNED,
+                    ConversationStatus.PENDING,
+                    ConversationStatus.AI_HANDLING,
+                    ConversationStatus.WAITING_ON_CUSTOMER,
+                    ConversationStatus.ON_HOLD,
+                ])
+            )
         elif queue == "pending":
             query = query.filter(Conversation.status == ConversationStatus.PENDING)
         elif queue == "assigned":
-            query = query.filter(Conversation.status == ConversationStatus.ASSIGNED)
+            query = query.filter(Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED]))
         elif queue == "unassigned":
             query = query.filter(
                 Conversation.assigned_agent_id.is_(None),
-                Conversation.status.in_([ConversationStatus.AI_HANDLING, ConversationStatus.PENDING]),
+                Conversation.status.in_([
+                    ConversationStatus.OPEN,
+                    ConversationStatus.ASSIGNED,
+                    ConversationStatus.PENDING,
+                    ConversationStatus.AI_HANDLING,
+                ]),
             )
         elif queue == "resolved":
             query = query.filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
@@ -466,9 +518,11 @@ def ensure_can_view(user: User, conversation: Conversation) -> None:
     if user.role == "customer" and conversation.customer_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this conversation")
     elif user.role == "agent":
-        # Agents can view if assigned or if in inbox/pending queues
+        # Agents can view if assigned, if in inbox/pending queues, or if merged
         if conversation.assigned_agent_id != user.id and conversation.status not in (
-            ConversationStatus.AI_HANDLING, ConversationStatus.PENDING
+            ConversationStatus.AI_HANDLING,
+            ConversationStatus.PENDING,
+            ConversationStatus.MERGED,
         ):
             raise HTTPException(status_code=403, detail="Not authorized to view this conversation")
 
@@ -545,6 +599,7 @@ def build_conversation_list_item(db: Session, conversation: Conversation, viewer
         "last_message": last_msg.content if last_msg else None,
         "last_message_at": last_msg.created_at if last_msg else None,
         "unread_count": unread,
+        "merged_into_id": getattr(conversation, "merged_into_id", None),
     }
 
 
@@ -696,3 +751,215 @@ def compute_unread_count(db: Session, conversation: Conversation, role: str) -> 
             Message.created_at > last_read
         ).count()
     return 0
+
+
+def get_linked_conversations_for_conversation(db: Session, conversation_id: int) -> List[dict]:
+    """Retrieve all conversations linked to the given conversation."""
+    links = (
+        db.query(ConversationLink)
+        .filter(
+            or_(
+                ConversationLink.conversation_id_1 == conversation_id,
+                ConversationLink.conversation_id_2 == conversation_id,
+            )
+        )
+        .order_by(ConversationLink.created_at.desc())
+        .all()
+    )
+    result = []
+    for link in links:
+        other_id = link.conversation_id_2 if link.conversation_id_1 == conversation_id else link.conversation_id_1
+        other_conv = db.query(Conversation).filter(Conversation.id == other_id).first()
+        if not other_conv:
+            continue
+        result.append({
+            "id": link.id,
+            "linked_conversation_id": other_conv.id,
+            "subject": other_conv.subject,
+            "status": other_conv.status,
+            "customer_id": other_conv.customer_id,
+            "customer_name": other_conv.customer.full_name if other_conv.customer else "Unknown Customer",
+            "created_at": link.created_at,
+            "created_by_id": link.created_by_id,
+            "created_by_name": link.created_by.full_name if link.created_by else None,
+        })
+    return result
+
+
+def link_conversations(db: Session, conv_id: int, target_id: int, actor: User) -> dict:
+    """Link two related conversations together without combining messages."""
+    if conv_id == target_id:
+        raise HTTPException(status_code=400, detail="Cannot link a conversation to itself")
+
+    c1_id, c2_id = min(conv_id, target_id), max(conv_id, target_id)
+    c1 = db.query(Conversation).filter(Conversation.id == c1_id).first()
+    c2 = db.query(Conversation).filter(Conversation.id == c2_id).first()
+    if not c1 or not c2:
+        raise HTTPException(status_code=404, detail="One or both conversations not found")
+
+    existing = db.query(ConversationLink).filter(
+        ConversationLink.conversation_id_1 == c1_id,
+        ConversationLink.conversation_id_2 == c2_id,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Conversations are already linked")
+
+    link = ConversationLink(
+        conversation_id_1=c1_id,
+        conversation_id_2=c2_id,
+        created_by_id=actor.id,
+    )
+    db.add(link)
+
+    # System events for audit
+    record_system_event(db, c1, f"Linked to conversation #{c2_id} by {actor.full_name}", actor_id=actor.id)
+    record_system_event(db, c2, f"Linked to conversation #{c1_id} by {actor.full_name}", actor_id=actor.id)
+
+    db.commit()
+    db.refresh(link)
+    return {
+        "id": link.id,
+        "conversation_id_1": c1_id,
+        "conversation_id_2": c2_id,
+        "created_at": link.created_at,
+        "created_by_id": actor.id,
+    }
+
+
+def unlink_conversations(db: Session, conv_id: int, target_id: int, actor: User) -> dict:
+    """Unlink two previously linked conversations."""
+    c1_id, c2_id = min(conv_id, target_id), max(conv_id, target_id)
+    link = db.query(ConversationLink).filter(
+        ConversationLink.conversation_id_1 == c1_id,
+        ConversationLink.conversation_id_2 == c2_id,
+    ).first()
+    if not link:
+        raise HTTPException(status_code=404, detail="Conversation link not found")
+
+    c1 = db.query(Conversation).filter(Conversation.id == c1_id).first()
+    c2 = db.query(Conversation).filter(Conversation.id == c2_id).first()
+
+    db.delete(link)
+
+    if c1:
+        record_system_event(db, c1, f"Unlinked from conversation #{c2_id} by {actor.full_name}", actor_id=actor.id)
+    if c2:
+        record_system_event(db, c2, f"Unlinked from conversation #{c1_id} by {actor.full_name}", actor_id=actor.id)
+
+    db.commit()
+    return {"message": f"Successfully unlinked conversation #{conv_id} and #{target_id}"}
+
+
+def merge_conversations(
+    db: Session,
+    source_id: int,
+    target_id: int,
+    actor: User,
+    confirm_cross_customer: bool = False,
+) -> Conversation:
+    """Merge duplicate conversations into a target conversation while preserving message provenance."""
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a conversation into itself")
+
+    source = db.query(Conversation).filter(Conversation.id == source_id).first()
+    target = db.query(Conversation).filter(Conversation.id == target_id).first()
+
+    if not source:
+        raise HTTPException(status_code=404, detail="Source conversation not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="Target conversation not found")
+
+    if source.status == ConversationStatus.MERGED or source.merged_into_id:
+        raise HTTPException(status_code=400, detail=f"Source conversation #{source_id} is already merged into #{source.merged_into_id}")
+
+    if target.status == ConversationStatus.MERGED:
+        raise HTTPException(status_code=400, detail=f"Target conversation #{target_id} is already merged and cannot receive messages")
+
+    # Circular merge detection: ensure target does not eventually point back to source
+    curr = target
+    visited = {source_id}
+    while curr and curr.merged_into_id:
+        if curr.merged_into_id in visited:
+            raise HTTPException(status_code=400, detail="Circular merge detected")
+        visited.add(curr.merged_into_id)
+        curr = db.query(Conversation).filter(Conversation.id == curr.merged_into_id).first()
+
+    # Cross-customer validation
+    is_cross_customer = source.customer_id != target.customer_id
+    if is_cross_customer:
+        if actor.role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Merging conversations belonging to different customers requires administrator privileges",
+            )
+        if not confirm_cross_customer:
+            raise HTTPException(
+                status_code=400,
+                detail="Source and target conversations belong to different customers. Explicit confirmation is required to proceed.",
+            )
+
+    # 1. Repoint all messages from source to target, recording provenance
+    source_messages = db.query(Message).filter(Message.conversation_id == source_id).all()
+    for msg in source_messages:
+        if not msg.original_conversation_id:
+            msg.original_conversation_id = source_id
+        msg.conversation_id = target_id
+
+    # 2. Repoint attachments
+    from app.models.attachment import Attachment
+    attachments = db.query(Attachment).filter(Attachment.conversation_id == source_id).all()
+    for att in attachments:
+        att.conversation_id = target_id
+
+    # 3. Repoint tasks
+    from app.models.conversation_task import ConversationTask
+    tasks = db.query(ConversationTask).filter(ConversationTask.conversation_id == source_id).all()
+    for task in tasks:
+        task.conversation_id = target_id
+
+    # 4. Update source conversation status
+    source.status = ConversationStatus.MERGED
+    source.merged_into_id = target_id
+    source.updated_at = _utcnow()
+
+    # 5. Update target conversation
+    target.updated_at = _utcnow()
+    target.last_message_at = _utcnow()
+
+    # 6. Audit & system events
+    source_cust_name = source.customer.full_name if source.customer else f"Customer #{source.customer_id}"
+    target_cust_name = target.customer.full_name if target.customer else f"Customer #{target.customer_id}"
+
+    record_system_event(
+        db,
+        target,
+        f"Conversation #{source_id} ({source_cust_name}) merged into this conversation by {actor.full_name}",
+        actor_id=actor.id,
+    )
+    record_system_event(
+        db,
+        source,
+        f"This conversation was merged into #{target_id} ({target_cust_name}) by {actor.full_name}",
+        actor_id=actor.id,
+    )
+
+    import json
+    audit_entry = AuditLog(
+        user_id=actor.id,
+        action="conversation.merge",
+        resource_type="conversation",
+        resource_id=target_id,
+        details=json.dumps({
+            "source_id": source_id,
+            "target_id": target_id,
+            "source_customer_id": source.customer_id,
+            "target_customer_id": target.customer_id,
+            "cross_customer": is_cross_customer,
+            "messages_moved": len(source_messages),
+        }),
+    )
+    db.add(audit_entry)
+
+    db.commit()
+    db.refresh(target)
+    return target

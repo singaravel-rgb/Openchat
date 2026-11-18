@@ -37,13 +37,16 @@ def get_ai_config(
     # Check provider availability
     provider_available = True
     availability_message = None
-    if runtime.provider == "openai" and not runtime.openai_api_key:
+    if runtime.provider == "gemini" and not runtime.gemini_api_key:
+        provider_available = False
+        availability_message = "Google Gemini API key not configured"
+    elif runtime.provider == "openai" and not runtime.openai_api_key:
         provider_available = False
         availability_message = "OpenAI API key not configured"
     elif runtime.provider == "anthropic" and not runtime.anthropic_api_key:
         provider_available = False
         availability_message = "Anthropic API key not configured"
-    elif runtime.provider not in ("demo", "openai", "anthropic"):
+    elif runtime.provider not in ("demo", "gemini", "openai", "anthropic"):
         provider_available = False
         availability_message = f"Unknown provider: {runtime.provider}"
 
@@ -62,10 +65,12 @@ def get_ai_config(
         escalation_rules=cfg.escalation_rules,
         max_response_length=cfg.max_response_length,
         knowledge_sources=cfg.knowledge_sources,
-        has_openai_api_key=bool(cfg.openai_api_key_encrypted),
-        has_anthropic_api_key=bool(cfg.anthropic_api_key_encrypted),
-        openai_api_key_masked=mask_secret(decrypt_secret(cfg.openai_api_key_encrypted)),
-        anthropic_api_key_masked=mask_secret(decrypt_secret(cfg.anthropic_api_key_encrypted)),
+        has_gemini_api_key=bool(cfg.gemini_api_key_encrypted or getattr(settings, "gemini_api_key", None)),
+        has_openai_api_key=bool(cfg.openai_api_key_encrypted or getattr(settings, "openai_api_key", None)),
+        has_anthropic_api_key=bool(cfg.anthropic_api_key_encrypted or getattr(settings, "anthropic_api_key", None)),
+        gemini_api_key_masked=mask_secret(decrypt_secret(cfg.gemini_api_key_encrypted) or getattr(settings, "gemini_api_key", None)),
+        openai_api_key_masked=mask_secret(decrypt_secret(cfg.openai_api_key_encrypted) or getattr(settings, "openai_api_key", None)),
+        anthropic_api_key_masked=mask_secret(decrypt_secret(cfg.anthropic_api_key_encrypted) or getattr(settings, "anthropic_api_key", None)),
         provider_available=provider_available,
         availability_message=availability_message,
         last_test_status=cfg.last_test_status,
@@ -85,12 +90,21 @@ def update_ai_config(
     update_data = data.model_dump(exclude_unset=True)
 
     # Handle API key clearing
+    if update_data.pop("clear_gemini_api_key", False):
+        cfg.gemini_api_key_encrypted = None
     if update_data.pop("clear_openai_api_key", False):
         cfg.openai_api_key_encrypted = None
     if update_data.pop("clear_anthropic_api_key", False):
         cfg.anthropic_api_key_encrypted = None
 
     # Handle API key updates
+    if "gemini_api_key" in update_data:
+        key = update_data.pop("gemini_api_key")
+        if key is not None and key.strip():
+            cfg.gemini_api_key_encrypted = encrypt_secret(key)
+        else:
+            cfg.gemini_api_key_encrypted = None
+
     if "openai_api_key" in update_data:
         key = update_data.pop("openai_api_key")
         if key is not None and key.strip():
@@ -127,11 +141,12 @@ async def test_ai_provider(
     started = time.perf_counter()
 
     # Use provided config or fall back to stored config
-    if data.provider or data.model or data.openai_api_key or data.anthropic_api_key:
+    if data.provider or data.model or data.gemini_api_key or data.openai_api_key or data.anthropic_api_key:
         from app.services.ai_service import RuntimeAIConfig
         runtime = RuntimeAIConfig(
-            provider=data.provider or "demo",
-            model=data.model or "gpt-4o-mini",
+            provider=data.provider or "gemini",
+            model=data.model or "gemini-flash-latest",
+            gemini_api_key=data.gemini_api_key,
             openai_api_key=data.openai_api_key,
             anthropic_api_key=data.anthropic_api_key,
         )
@@ -151,7 +166,7 @@ async def test_ai_provider(
         latency = int((time.perf_counter() - started) * 1000)
 
         # Update last test status on stored config if not using temp config
-        if not (data.provider or data.model or data.openai_api_key or data.anthropic_api_key):
+        if not (data.provider or data.model or data.gemini_api_key or data.openai_api_key or data.anthropic_api_key):
             cfg = get_or_create_ai_config(db)
             cfg.last_test_status = "success"
             cfg.last_test_message = f"Test successful ({provider_used})"
@@ -170,7 +185,7 @@ async def test_ai_provider(
         error_msg = str(e)
 
         # Update last test status on stored config
-        if not (data.provider or data.model or data.openai_api_key or data.anthropic_api_key):
+        if not (data.provider or data.model or data.gemini_api_key or data.openai_api_key or data.anthropic_api_key):
             cfg = get_or_create_ai_config(db)
             cfg.last_test_status = "failed"
             cfg.last_test_message = error_msg

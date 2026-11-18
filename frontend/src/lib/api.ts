@@ -1,4 +1,4 @@
-import type { Token, User, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, AuditLogItem, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch, GlobalNoteResponse, AIFlowConfig, AIFlowResponse } from './types';
+import type { Token, User, UserDetail, UserInvitation, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, AuditLogItem, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch, GlobalNoteResponse, AIFlowConfig, AIFlowResponse, ConversationLinkItem } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -73,6 +73,15 @@ export const authApi = {
     }),
 
   me: () => fetchApi<User>('/auth/me'),
+
+  inspectInvitation: (token: string) =>
+    fetchApi<{ email: string; role: string; expires_at: string; is_expired: boolean }>(`/auth/invitations/${token}`),
+
+  acceptInvitation: (data: { token: string; full_name: string; password: string }) =>
+    fetchApi<Token>('/auth/invitations/accept', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const conversationApi = {
@@ -219,6 +228,29 @@ export const agentApi = {
 
   retractMessage: (conversationId: number, messageId: number) =>
     conversationApi.retractMessage(conversationId, messageId),
+
+  listLinks: (conversationId: number) =>
+    fetchApi<ConversationLinkItem[]>(`/agent/conversations/${conversationId}/links`),
+
+  linkConversation: (conversationId: number, targetConversationId: number) =>
+    fetchApi<{ id: number }>(`/agent/conversations/${conversationId}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ target_conversation_id: targetConversationId }),
+    }),
+
+  unlinkConversation: (conversationId: number, targetConversationId: number) =>
+    fetchApi<{ message: string }>(`/agent/conversations/${conversationId}/link/${targetConversationId}`, {
+      method: 'DELETE',
+    }),
+
+  mergeConversation: (conversationId: number, targetConversationId: number, confirmCrossCustomer: boolean = false) =>
+    fetchApi<ConversationDetail>(`/agent/conversations/${conversationId}/merge`, {
+      method: 'POST',
+      body: JSON.stringify({
+        target_conversation_id: targetConversationId,
+        confirm_cross_customer: confirmCrossCustomer,
+      }),
+    }),
 };
 
 export const customerApi = {
@@ -276,6 +308,39 @@ export const adminApi = {
     if (params?.offset) searchParams.append('offset', params.offset.toString());
     return fetchApi<AuditLogItem[]>(`/admin/audit-logs?${searchParams}`);
   },
+
+  // User & Role Management
+  listUsers: (params?: { role?: string; is_active?: boolean; q?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.role) searchParams.append('role', params.role);
+    if (params?.is_active !== undefined) searchParams.append('is_active', params.is_active.toString());
+    if (params?.q) searchParams.append('q', params.q);
+    return fetchApi<UserDetail[]>(`/admin/users?${searchParams}`);
+  },
+
+  inviteUser: (data: { email: string; role: string; full_name?: string }) =>
+    fetchApi<UserInvitation>('/admin/users/invite', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listInvitations: () => fetchApi<UserInvitation[]>('/admin/users/invitations'),
+
+  resendInvitation: (invitationId: number) =>
+    fetchApi<UserInvitation>(`/admin/users/invitations/${invitationId}/resend`, {
+      method: 'POST',
+    }),
+
+  revokeInvitation: (invitationId: number) =>
+    fetchApi<{ detail: string }>(`/admin/users/invitations/${invitationId}`, {
+      method: 'DELETE',
+    }),
+
+  updateUser: (userId: number, data: { full_name?: string; role?: string; is_active?: boolean }) =>
+    fetchApi<UserDetail>(`/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 
   listAgents: () => fetchApi<AdminAgent[]>('/admin/agents'),
 
@@ -346,6 +411,18 @@ export const adminApi = {
 
   retractMessage: (conversationId: number, messageId: number) =>
     conversationApi.retractMessage(conversationId, messageId),
+
+  listLinks: (conversationId: number) =>
+    agentApi.listLinks(conversationId),
+
+  linkConversation: (conversationId: number, targetConversationId: number) =>
+    agentApi.linkConversation(conversationId, targetConversationId),
+
+  unlinkConversation: (conversationId: number, targetConversationId: number) =>
+    agentApi.unlinkConversation(conversationId, targetConversationId),
+
+  mergeConversation: (conversationId: number, targetConversationId: number, confirmCrossCustomer: boolean = false) =>
+    agentApi.mergeConversation(conversationId, targetConversationId, confirmCrossCustomer),
 
   suggestAgentReply: (id: number) =>
     fetchApi<{ draft: string; provider: string; usage: Record<string, unknown>; sources: Array<{ type: string; id: number; title: string; excerpt: string | null; score: number }> }>(`/agent/conversations/${id}/ai-suggest`, { method: 'POST' }),
@@ -448,7 +525,50 @@ export const adminApi = {
   // Widget
   getWidgetConfig: () => fetchApi<any>('/admin/widget/config'),
   updateWidgetConfig: (data: any) => fetchApi<any>('/admin/widget/config', { method: 'PUT', body: JSON.stringify(data) }),
-  getWidgetEmbedSnippet: () => fetchApi<{ snippet: string; script_url: string }>('/admin/widget/embed-snippet'),
+  getWidgetEmbedSnippet: (backendUrl?: string) =>
+    fetchApi<{ snippet: string; script_url: string }>(
+      `/admin/widget/embed-snippet${backendUrl ? `?backend_url=${encodeURIComponent(backendUrl)}` : ''}`
+    ),
+  testWidgetConnection: () =>
+    fetchApi<{
+      status: string;
+      latency_ms: number;
+      is_enabled: boolean;
+      checks: Array<{ name: string; status: string; detail: string }>;
+    }>('/admin/widget/test-connection', { method: 'POST' }),
+
+  // Integrations
+  listIntegrations: () =>
+    fetchApi<Array<{
+      id: string;
+      name: string;
+      category: string;
+      description: string;
+      status: string;
+      is_functional: boolean;
+      is_enabled: boolean;
+      version: string;
+      config_summary: Record<string, any>;
+      actions_supported: string[];
+      notes?: string;
+    }>>('/admin/integrations'),
+  testIntegration: (id: string) =>
+    fetchApi<{
+      success: boolean;
+      status: string;
+      latency_ms: number;
+      message: string;
+      details?: Record<string, any>;
+    }>(`/admin/integrations/${id}/test`, { method: 'POST' }),
+  configureIntegration: (id: string, payload: { is_enabled?: boolean; config?: Record<string, any> }) =>
+    fetchApi<{ success: boolean; message: string }>(`/admin/integrations/${id}/configure`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  disconnectIntegration: (id: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/admin/integrations/${id}/disconnect`, {
+      method: 'POST',
+    }),
 
   // Reports
   getConversationMetrics: (filters?: ReportFilters) => {

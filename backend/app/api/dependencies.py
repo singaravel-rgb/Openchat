@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.redis import redis_client
 from app.core.roles import UserRole
 from app.db.session import get_db
 from app.models.user import User
@@ -34,9 +35,24 @@ def get_current_user(
         )
 
         user_id = int(payload.get("sub"))
+        token_iat = float(payload.get("iat", 0))
 
     except (jwt.InvalidTokenError, TypeError, ValueError):
         raise credentials_error
+
+    # Immediate session revocation check (e.g. role change or deactivation)
+    try:
+        if redis_client:
+            revocation_ts = redis_client.get(f"revoked_user:{user_id}")
+            if revocation_ts:
+                if isinstance(revocation_ts, bytes):
+                    revocation_ts = revocation_ts.decode("utf-8")
+                if token_iat > 0 and token_iat < float(revocation_ts):
+                    raise credentials_error
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Redis offline shouldn't break DB fallback
 
     user = db.query(User).filter(User.id == user_id).first()
 
@@ -54,6 +70,10 @@ def require_roles(*allowed_roles: str | UserRole):
 
         allowed_values = {role.value if isinstance(role, UserRole) else role for role in allowed_roles}
 
+        # Super admin always has full access across all administrative and agent resources
+        if current_user.role == UserRole.SUPER_ADMIN or current_user.role == "super_admin":
+            return current_user
+
         if current_user.role not in allowed_values:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -63,3 +83,15 @@ def require_roles(*allowed_roles: str | UserRole):
         return current_user
 
     return role_checker
+
+
+def require_super_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if current_user.role != UserRole.SUPER_ADMIN and current_user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super Admin privileges required to access this resource",
+        )
+    return current_user
+

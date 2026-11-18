@@ -44,6 +44,7 @@ class MessageResponse(BaseModel):
     edited_by_id: Optional[int] = None
     is_retracted: bool = False
     retracted_at: Optional[datetime] = None
+    original_conversation_id: Optional[int] = None
 
 
 class ConversationUpdate(BaseModel):
@@ -70,6 +71,28 @@ class ConversationResponse(BaseModel):
     closed_at: Optional[datetime] = None
     customer_last_read_at: Optional[datetime] = None
     agent_last_read_at: Optional[datetime] = None
+    merged_into_id: Optional[int] = None
+
+
+class ConversationLinkCreate(BaseModel):
+    target_conversation_id: int
+
+
+class ConversationLinkItem(BaseModel):
+    id: int
+    linked_conversation_id: int
+    subject: Optional[str] = None
+    status: str
+    customer_id: int
+    customer_name: Optional[str] = None
+    created_at: datetime
+    created_by_id: Optional[int] = None
+    created_by_name: Optional[str] = None
+
+
+class ConversationMergeRequest(BaseModel):
+    target_conversation_id: int
+    confirm_cross_customer: bool = False
 
 
 class GlobalNoteUpdate(BaseModel):
@@ -103,6 +126,8 @@ class ConversationDetail(ConversationResponse):
     last_message: Optional[str] = None
     last_message_at: Optional[datetime] = None
     unread_count: int = 0
+    merged_into_id: Optional[int] = None
+    linked_conversations: Optional[List[ConversationLinkItem]] = None
 
 
 class ConversationListItem(BaseModel):
@@ -122,6 +147,7 @@ class ConversationListItem(BaseModel):
     last_message: Optional[str]
     last_message_at: Optional[datetime]
     unread_count: int = 0
+    merged_into_id: Optional[int] = None
 
 
 class ConversationListResponse(BaseModel):

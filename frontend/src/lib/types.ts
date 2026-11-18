@@ -2,7 +2,7 @@ export interface User {
   id: number;
   email: string;
   full_name: string;
-  role: 'customer' | 'agent' | 'admin';
+  role: 'customer' | 'agent' | 'admin' | 'super_admin';
   is_active: boolean;
   agent_profile?: {
     is_available: boolean;
@@ -10,6 +10,43 @@ export interface User {
     max_conversations: number;
     active_conversations: number;
   };
+}
+
+export interface UserSummary {
+  id: number;
+  full_name: string;
+  email: string;
+}
+
+export interface UserDetail {
+  id: number;
+  email: string;
+  full_name: string;
+  role: 'customer' | 'agent' | 'admin' | 'super_admin';
+  is_active: boolean;
+  created_at: string;
+  role_changed_at?: string | null;
+  created_by?: UserSummary | null;
+  last_role_changed_by?: UserSummary | null;
+  agent_profile?: {
+    is_available: boolean;
+    is_approved: boolean;
+    max_conversations: number;
+    active_conversations: number;
+  };
+}
+
+export interface UserInvitation {
+  id: number;
+  email: string;
+  role: 'super_admin' | 'admin' | 'agent';
+  status: 'pending' | 'accepted' | 'expired' | 'revoked';
+  token: string;
+  is_verified: boolean;
+  expires_at: string;
+  created_at: string;
+  accepted_at?: string | null;
+  invited_by?: UserSummary | null;
 }
 
 export interface Token {
@@ -33,6 +70,7 @@ export interface Conversation {
   closed_at?: string | null;
   customer_last_read_at?: string | null;
   agent_last_read_at?: string | null;
+  merged_into_id?: number | null;
 }
 
 export type ConversationStatus =
@@ -43,7 +81,8 @@ export type ConversationStatus =
   | 'on_hold'
   | 'ai_handling'
   | 'assigned'
-  | 'closed';
+  | 'closed'
+  | 'merged';
 
 export interface ConversationListItem extends Conversation {
   customer_name: string;
@@ -70,10 +109,23 @@ export interface Message {
   edited_by_id?: number | null;
   is_retracted?: boolean;
   retracted_at?: string | null;
+  original_conversation_id?: number | null;
 }
 
 export type MessageSenderType = 'customer' | 'agent' | 'ai' | 'system';
 export type MessageType = 'text' | 'internal_note' | 'system_event';
+
+export interface ConversationLinkItem {
+  id: number;
+  linked_conversation_id: number;
+  subject?: string | null;
+  status: string;
+  customer_id: number;
+  customer_name?: string | null;
+  created_at: string;
+  created_by_id?: number | null;
+  created_by_name?: string | null;
+}
 
 export interface ConversationDetail extends Conversation {
   messages: Message[];
@@ -84,6 +136,7 @@ export interface ConversationDetail extends Conversation {
   global_note_updated_at?: string | null;
   global_note_updated_by_id?: number | null;
   global_note_updated_by_name?: string | null;
+  linked_conversations?: ConversationLinkItem[];
   // Mirrors of the inbox card fields, returned by the detail endpoint so a
   // conversation can be reselected after refresh or from a notification link.
   customer_name?: string | null;
@@ -414,8 +467,10 @@ export interface AIConfig {
   escalation_rules: Record<string, unknown>;
   max_response_length: number;
   knowledge_sources: Record<string, unknown>;
+  has_gemini_api_key?: boolean;
   has_openai_api_key: boolean;
   has_anthropic_api_key: boolean;
+  gemini_api_key_masked?: string | null;
   openai_api_key_masked: string | null;
   anthropic_api_key_masked: string | null;
   provider_available: boolean;
@@ -430,8 +485,12 @@ export interface AIConfigUpdate {
   ai_enabled?: boolean;
   provider?: string;
   model?: string;
+  gemini_api_key?: string;
   openai_api_key?: string;
   anthropic_api_key?: string;
+  clear_gemini_api_key?: boolean;
+  clear_openai_api_key?: boolean;
+  clear_anthropic_api_key?: boolean;
   temperature?: number;
   max_tokens?: number;
   system_instructions?: string;
@@ -447,6 +506,7 @@ export interface AIConfigUpdate {
 export interface AITestRequest {
   provider?: string;
   model?: string;
+  gemini_api_key?: string;
   openai_api_key?: string;
   anthropic_api_key?: string;
 }

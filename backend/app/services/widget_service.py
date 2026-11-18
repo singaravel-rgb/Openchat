@@ -94,13 +94,15 @@ def update_widget_config(db: Session, data: dict) -> WidgetConfig:
 def normalize_origin(origin: str | None) -> str | None:
     if not origin:
         return None
-    origin = origin.strip()
+    origin = origin.strip().lower()
     if not origin:
         return None
     try:
         p = urlparse(origin)
         if p.scheme and p.netloc:
             return f"{p.scheme}://{p.netloc}"
+        elif not p.scheme and p.path:
+            return p.path.rstrip("/")
     except Exception:
         return None
     return origin
@@ -126,7 +128,18 @@ def validate_widget_origin(cfg: WidgetConfig, request: Request, page_url: str | 
         if require_when_configured:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Origin is required for this widget")
         return None
-    if origin not in allowed:
+    norm_origin = normalize_origin(origin)
+    origin_netloc = urlparse(origin).netloc.lower() if "://" in origin else origin.lower()
+    is_allowed = False
+    for a in allowed:
+        if a == norm_origin:
+            is_allowed = True
+            break
+        a_netloc = urlparse(a).netloc.lower() if "://" in a else a.lower()
+        if a_netloc and a_netloc == origin_netloc:
+            is_allowed = True
+            break
+    if not is_allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Origin not allowed")
     return origin
 
@@ -287,3 +300,5 @@ def rate_limit_for_request(request: Request, scope: str, limit: int, window_seco
 def build_embed_snippet(widget_base_url: str) -> str:
     base = widget_base_url.rstrip('/')
     return f'<script src="{base}/api/v1/widget/embed.js" async></script>'
+
+

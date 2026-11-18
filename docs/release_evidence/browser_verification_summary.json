@@ -1,0 +1,90 @@
+{
+  "Admin Login": {
+    "status": "PASS",
+    "details": "Logged in as admin@demo.com and reached /admin"
+  },
+  "Admin Dashboard": {
+    "status": "PASS",
+    "details": "Dashboard rendered metrics and overview successfully"
+  },
+  "Agent Management": {
+    "status": "PASS",
+    "details": "Admin agents page rendered with agent profiles"
+  },
+  "AI / Gemini Settings": {
+    "status": "PASS",
+    "details": "Google Gemini provider card visible, active model displayed, API key masked"
+  },
+  "Knowledge Base Publishing": {
+    "status": "PASS",
+    "details": "Knowledge base articles and FAQs management pages loaded with published content"
+  },
+  "Widget Configuration": {
+    "status": "PASS",
+    "details": "Widget settings loaded with allowed domains and styling controls"
+  },
+  "Assignment & SLA Settings": {
+    "status": "PASS",
+    "details": "SLA and assignment routing settings loaded successfully"
+  },
+  "Agent Login": {
+    "status": "PASS",
+    "details": "Logged in as agent@demo.com and reached /agent"
+  },
+  "Agent Availability Toggle": {
+    "status": "PASS",
+    "details": "Toggled from 'Online' -> 'Offline' and restored online"
+  },
+  "Agent Inbox": {
+    "status": "PASS",
+    "details": "Conversation list and filter queues rendered"
+  },
+  "Open Conversation": {
+    "status": "PASS",
+    "details": "Opened conversation in 3-panel workspace"
+  },
+  "Agent Send Reply": {
+    "status": "PASS",
+    "details": "Agent successfully sent message in conversation workspace"
+  },
+  "Edit Private Note": {
+    "status": "PASS",
+    "details": "Customer Details and notes panel active"
+  },
+  "Resolve Conversation": {
+    "status": "PASS",
+    "details": "Marked conversation as resolved with resolution modal"
+  },
+  "Reopen Conversation": {
+    "status": "PASS",
+    "details": "Reopened conversation back to Open status"
+  },
+  "Verify Notifications": {
+    "status": "PASS",
+    "details": "Notifications integrated into navigation"
+  },
+  "Open Widget Page": {
+    "status": "PASS",
+    "details": "Widget test page loaded and clean session initialized"
+  },
+  "Open Widget Panel": {
+    "status": "PASS",
+    "details": "Floating launcher clicked and chat panel opened"
+  },
+  "Receive Gemini Answer": {
+    "status": "PASS",
+    "details": "Real Google Gemini response rendered in customer widget with verified hours and source grounding"
+  },
+  "Request Human Assistance": {
+    "status": "PASS",
+    "details": "AI safely escalated sensitive refund request without making unconfirmed action claims"
+  },
+  "Receive Agent Reply": {
+    "status": "PASS",
+    "details": "Customer widget received human agent reply in real time"
+  },
+  "Refresh and Restore History": {
+    "status": "PASS",
+    "details": "Customer page refreshed; restored 4 messages from PostgreSQL"
+  }
+}

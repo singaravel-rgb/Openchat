@@ -256,7 +256,9 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: SidebarProps)
             <Avatar name={user.full_name} size="md" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{user.full_name}</p>
-              <p className="text-xs capitalize text-slate-500">{user.role}</p>
+              <p className="text-xs capitalize text-slate-500">
+                {user.role === 'super_admin' ? '⭐ Super Admin' : user.role}
+              </p>
             </div>
           </div>
         )}
@@ -416,7 +418,7 @@ export const NavIcons = {
 };
 
 export function createNavigation(user: User): NavGroup[] {
-  const isAdmin = user.role === 'admin';
+  const isAdmin = user.role === 'admin' || user.role === 'super_admin';
   const isAgent = user.role === 'agent';
   const navigation: NavGroup[] = [];
 
@@ -427,6 +429,7 @@ export function createNavigation(user: User): NavGroup[] {
       icon: NavIcons.workspace,
       items: [
         { label: 'All Conversations', href: '/admin/conversations', icon: NavIcons.conversations },
+        { label: 'Users & Roles', href: '/admin/users', icon: NavIcons.agents },
         { label: 'Agents', href: '/admin/agents', icon: NavIcons.agents },
         { label: 'Teams', href: '/admin/teams', icon: NavIcons.teams },
       ],
@@ -456,6 +459,7 @@ export function createNavigation(user: User): NavGroup[] {
         { label: 'General', href: '/admin/settings', icon: NavIcons.settings },
         { label: 'AI Flow & Rules', href: '/admin/settings/ai-flow', icon: NavIcons.rules },
         { label: 'AI Configuration', href: '/admin/settings/ai', icon: NavIcons.settings },
+        { label: 'Integrations & Channels', href: '/admin/integrations', icon: NavIcons.customFields },
         { label: 'Widget', href: '/admin/settings/widget', icon: NavIcons.settings },
         { label: 'Assignment Rules', href: '/admin/settings/rules', icon: NavIcons.rules },
         { label: 'Notifications', href: '/admin/settings/notifications', icon: NavIcons.notifications },

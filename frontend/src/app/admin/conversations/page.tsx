@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 export default function AdminConversationsPage() {
   const { user } = useAuth();
 
-  if (!user || user.role !== 'admin') return null;
+  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return null;
 
   return <ThreePanelWorkspace userRole="admin" userId={user.id} />;
 }

@@ -24,6 +24,7 @@ from app.schemas.conversation import (
     StatusUpdateRequest,
     MessageCreate,
     MessageResponse,
+    ConversationLinkItem,
 )
 from app.schemas.auth import UserCreate, AdminAgentCreate
 from app.services.conversation_service import (
@@ -38,6 +39,7 @@ from app.services.conversation_service import (
     resolve_conversation as svc_resolve,
     mark_conversation_read,
     update_global_note,
+    get_linked_conversations_for_conversation,
 )
 from app.services.sla_service import record_first_response
 
@@ -363,6 +365,11 @@ def get_conversation_admin(
         last_message=item.get("last_message"),
         last_message_at=item.get("last_message_at"),
         unread_count=item.get("unread_count", 0),
+        merged_into_id=getattr(conversation, "merged_into_id", None),
+        linked_conversations=[
+            ConversationLinkItem.model_validate(l)
+            for l in get_linked_conversations_for_conversation(db, conversation.id)
+        ],
     )
 
 

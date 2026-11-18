@@ -38,7 +38,7 @@ export default function LoginForm() {
         setError('Customer accounts cannot access the admin or agent portals. Customers use the chat widget on the host application.');
       } else if (userData.role === 'agent') {
         router.push('/agent');
-      } else if (userData.role === 'admin') {
+      } else if (userData.role === 'admin' || userData.role === 'super_admin') {
         router.push('/admin');
       }
     } catch (err) {
@@ -92,14 +92,6 @@ export default function LoginForm() {
               {isLoading ? 'Signing in...' : 'Sign in'}
             </Button>
           </form>
-
-          <hr className="border-slate-200 dark:border-slate-800" />
-
-          <div className="text-center text-sm text-slate-500 dark:text-slate-400">
-            <p>Demo accounts:</p>
-            <p className="font-mono text-xs mt-1">agent@demo.com / demo1234</p>
-            <p className="font-mono text-xs">admin@demo.com / demo1234</p>
-          </div>
         </CardContent>
       </Card>
     </div>

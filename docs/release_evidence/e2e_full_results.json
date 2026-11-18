@@ -1,0 +1,42 @@
+[
+  {
+    "step": "Widget Gemini AI Grounded Response",
+    "status": "PASS",
+    "details": "Received: Hello! I'd be happy to help explain how Forex conversion rates and handling fees"
+  },
+  {
+    "step": "Action-Claim Safety Enforcement",
+    "status": "PASS",
+    "details": "False claim intercepted and converted to: 'I have recorded your request. A support agent will review your account and assist with submitting this for processing..'"
+  },
+  {
+    "step": "Database Persistence & Schema",
+    "status": "PASS",
+    "details": "Conv #1195 with 2 messages committed in Postgres"
+  },
+  {
+    "step": "Admin All Conversations & Refresh Persistence",
+    "status": "PASS",
+    "details": "Conv #1195 fully visible and persistent on reload"
+  },
+  {
+    "step": "Human Escalation & Auto-Assignment",
+    "status": "PASS",
+    "details": "Assigned to Marcus Reed (merge_agent@test.com)"
+  },
+  {
+    "step": "Agent Delivery & Internal Note Privacy",
+    "status": "PASS",
+    "details": "Customer received agent message; Private note remained strictly confidential"
+  },
+  {
+    "step": "Edge Case: Long Message Handling",
+    "status": "PASS",
+    "details": "Successfully accepted and stored 1079 character message without truncation"
+  },
+  {
+    "step": "Conversation Resolution Lifecycle",
+    "status": "PASS",
+    "details": "Conversation status successfully transitioned to 'resolved'"
+  }
+]

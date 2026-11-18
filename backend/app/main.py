@@ -34,8 +34,43 @@ app = FastAPI(
     ],
 )
 
+class OpenChatCORSMiddleware(CORSMiddleware):
+    def is_allowed_origin(self, origin: str) -> bool:
+        if getattr(settings, "environment", "development") == "production":
+            is_local = "localhost" in origin.lower() or "127.0.0.1" in origin.lower()
+            if is_local and not getattr(settings, "allow_localhost_in_production", False):
+                return False
+        if super().is_allowed_origin(origin):
+            return True
+        try:
+            from app.db.session import SessionLocal
+            from app.models.widget import WidgetConfig
+            from app.services.widget_service import normalize_origin
+            from urllib.parse import urlparse
+            db = SessionLocal()
+            try:
+                cfg = db.query(WidgetConfig).first()
+                if cfg and cfg.allowed_domains:
+                    norm_origin = normalize_origin(origin)
+                    origin_netloc = urlparse(origin).netloc.lower() if "://" in origin else origin.lower()
+                    for d in cfg.allowed_domains:
+                        if not d or not isinstance(d, str):
+                            continue
+                        nd = normalize_origin(d)
+                        if nd == norm_origin:
+                            return True
+                        d_netloc = urlparse(nd).netloc.lower() if "://" in nd else nd.lower()
+                        if d_netloc and d_netloc == origin_netloc:
+                            return True
+            finally:
+                db.close()
+        except Exception:
+            pass
+        return False
+
+
 app.add_middleware(
-    CORSMiddleware,
+    OpenChatCORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
@@ -52,3 +87,9 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/")
 def root():
     return {"message": "Welcome to OpenChat"}
+
+
+@app.get("/health")
+def health_root():
+    return {"status": "ok", "service": "OpenChat API"}
+

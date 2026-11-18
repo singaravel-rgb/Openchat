@@ -35,7 +35,9 @@ def reset_rate_limits():
         pass
 
 
-def _login(email, password="demo1234"):
+def _login(email, password="password123"):
+    if email == "singaravel@vananam.com":
+        password = "SuperAdminPassword2026!"
     r = client.post("/api/v1/auth/login", data={"username": email, "password": password})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -43,7 +45,11 @@ def _login(email, password="demo1234"):
 
 def _ensure_admin_config(allowed_domains=None, **kwargs):
     reset_rate_limits()
-    admin_h = _login("admin@demo.com")
+    admin_h = _login("singaravel@vananam.com")
+    domains = list(allowed_domains) if allowed_domains is not None else []
+    for d in ["http://localhost:8080", "http://127.0.0.1:8080"]:
+        if d not in domains:
+            domains.append(d)
     payload = {
         "widget_title": "OpenChat Test",
         "brand_name": "OpenChat",
@@ -52,7 +58,7 @@ def _ensure_admin_config(allowed_domains=None, **kwargs):
         "welcome_message": "Hi test",
         "greeting_text": "Start now",
         "widget_visibility": True,
-        "allowed_domains": allowed_domains or [],
+        "allowed_domains": domains,
         "widget_availability": True,
         "hide_launcher_on_help_page": True,
         "show_agent_avatar": True,
@@ -69,7 +75,7 @@ def test_widget_admin_config_and_embed_snippet():
     assert cfg["launcher_position"] == "bottom-left"
     assert cfg["welcome_message"] == "Hello from config"
     assert EXTERNAL_ORIGIN in cfg["allowed_domains"]
-    admin_h = _login("admin@demo.com")
+    admin_h = _login("singaravel@vananam.com")
     r = client.get("/api/v1/admin/widget/embed-snippet", headers=admin_h)
     assert r.status_code == 200, r.text
     data = r.json()
@@ -127,7 +133,7 @@ def test_widget_conversation_flow_ai_reply_handoff_idempotency_and_privacy():
     # ensure an available agent exists for potential handoff assignment
     db = SessionLocal()
     try:
-        agent = db.query(User).filter(User.email == "agent@demo.com").first()
+        agent = db.query(User).filter(User.email == "support.agent1@openchat.io").first()
         assert agent is not None
         profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
         if profile:
@@ -173,11 +179,11 @@ def test_widget_conversation_flow_ai_reply_handoff_idempotency_and_privacy():
     assert "message" in handoff
 
     # agent can reply; widget sees agent reply (no internals)
-    agent_h = _login("agent@demo.com")
-    admin_h = _login("admin@demo.com")
+    agent_h = _login("support.agent1@openchat.io")
+    admin_h = _login("singaravel@vananam.com")
     db = SessionLocal()
     try:
-        agent_user = db.query(User).filter(User.email == "agent@demo.com").first()
+        agent_user = db.query(User).filter(User.email == "support.agent1@openchat.io").first()
         assert agent_user is not None
         agent_id = agent_user.id
     finally:
@@ -216,7 +222,7 @@ def test_widget_conversation_flow_ai_reply_handoff_idempotency_and_privacy():
 
 def test_widget_session_linked_to_authenticated_customer_and_help_page_data():
     _ensure_admin_config(allowed_domains=[EXTERNAL_ORIGIN])
-    cust_h = _login("customer@demo.com")
+    cust_h = _login("phase1_customer@example.com")
     # create widget session with bearer -> linked (not guest)
     r = client.post("/api/v1/widget/session", json={"page_url": EXTERNAL_ORIGIN + "/"}, headers={"Origin": EXTERNAL_ORIGIN, **cust_h})
     assert r.status_code == 200, r.text

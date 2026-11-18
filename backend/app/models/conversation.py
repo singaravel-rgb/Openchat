@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Boolean, Text, func, JSON
+from sqlalchemy import DateTime, ForeignKey, Index, String, Boolean, Text, func, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import ConversationStatus
@@ -100,6 +100,13 @@ class Conversation(Base):
         nullable=True,
     )
 
+    # Conversation merge tracking
+    merged_into_id: Mapped[int | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # SLA tracking fields
     sla_response_due_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -142,10 +149,64 @@ class Conversation(Base):
         foreign_keys=[global_note_updated_by_id],
     )
 
+    merged_into = relationship(
+        "Conversation",
+        remote_side=[id],
+        foreign_keys=[merged_into_id],
+    )
+
     messages = relationship(
         Message,
         back_populates="conversation",
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by=Message.created_at,
+        foreign_keys="[Message.conversation_id]",
+    )
+
+
+class ConversationLink(Base):
+    __tablename__ = "conversation_links"
+
+    __table_args__ = (
+        UniqueConstraint("conversation_id_1", "conversation_id_2", name="uq_conversation_links_pair"),
+        Index("ix_conversation_links_c1", "conversation_id_1"),
+        Index("ix_conversation_links_c2", "conversation_id_2"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    conversation_id_1: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    conversation_id_2: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    created_by = relationship(
+        "User",
+        foreign_keys=[created_by_id],
+    )
+
+    conversation_1 = relationship(
+        "Conversation",
+        foreign_keys=[conversation_id_1],
+    )
+
+    conversation_2 = relationship(
+        "Conversation",
+        foreign_keys=[conversation_id_2],
     )

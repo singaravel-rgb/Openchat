@@ -21,6 +21,9 @@ from app.schemas.conversation import (
     StatusUpdateRequest,
     ConversationUpdate,
     GlobalNoteUpdate,
+    ConversationLinkCreate,
+    ConversationLinkItem,
+    ConversationMergeRequest,
 )
 from app.schemas.conversation_task import (
     ConversationTaskCreate,
@@ -45,6 +48,10 @@ from app.services.conversation_service import (
     assign_conversation as svc_assign,
     transition_status,
     update_global_note,
+    get_linked_conversations_for_conversation,
+    link_conversations,
+    unlink_conversations,
+    merge_conversations,
 )
 from app.services.ai_service import get_or_create_ai_config, get_runtime_ai_config, retrieve_knowledge_hits, generate_with_provider, format_knowledge_context
 
@@ -121,6 +128,11 @@ def _conversation_detail(
         last_message=item.get("last_message"),
         last_message_at=item.get("last_message_at"),
         unread_count=item.get("unread_count", 0),
+        merged_into_id=getattr(conversation, "merged_into_id", None),
+        linked_conversations=[
+            ConversationLinkItem.model_validate(l)
+            for l in get_linked_conversations_for_conversation(db, conversation.id)
+        ],
     )
 
 
@@ -177,12 +189,15 @@ def send_agent_message(
             return existing
 
     now = datetime.now(timezone.utc)
+    from app.services.ai_service import enforce_action_claim_safety
+    msg_content = enforce_action_claim_safety(data.content) if not data.is_internal else data.content
+
     message = Message(
         conversation_id=conversation.id,
         sender_id=current_user.id,
         sender_type=MessageSenderType.AGENT,
         message_type=MessageType.INTERNAL_NOTE if data.is_internal else MessageType.TEXT,
-        content=data.content,
+        content=msg_content,
         is_internal=data.is_internal,
         delivery_status="delivered",
         processed_at=now,
@@ -320,6 +335,72 @@ def update_global_note_agent(
     ensure_can_modify(current_user, conversation)
     res = update_global_note(db, conversation, data.text, current_user)
     return res
+
+
+@router.get("/conversations/{conversation_id}/links", response_model=list[ConversationLinkItem])
+def get_conversation_links(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+    links = get_linked_conversations_for_conversation(db, conversation_id)
+    return [ConversationLinkItem.model_validate(l) for l in links]
+
+
+@router.post("/conversations/{conversation_id}/link")
+def link_conversation_endpoint(
+    conversation_id: int,
+    data: ConversationLinkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_modify(current_user, conversation)
+    return link_conversations(db, conversation_id, data.target_conversation_id, current_user)
+
+
+@router.delete("/conversations/{conversation_id}/link/{target_id}")
+def unlink_conversation_endpoint(
+    conversation_id: int,
+    target_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_modify(current_user, conversation)
+    return unlink_conversations(db, conversation_id, target_id, current_user)
+
+
+@router.post("/conversations/{conversation_id}/merge", response_model=ConversationDetail)
+def merge_conversation_endpoint(
+    conversation_id: int,
+    data: ConversationMergeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Source conversation not found")
+    if conversation.status == ConversationStatus.MERGED or conversation.merged_into_id:
+        raise HTTPException(status_code=400, detail=f"Source conversation #{conversation_id} is already merged into #{conversation.merged_into_id}")
+    ensure_can_modify(current_user, conversation)
+
+    target = merge_conversations(
+        db=db,
+        source_id=conversation_id,
+        target_id=data.target_conversation_id,
+        actor=current_user,
+        confirm_cross_customer=data.confirm_cross_customer,
+    )
+    return _conversation_detail(db, target, limit=500, offset=0, viewer=current_user)
 
 
 @router.post("/conversations/{conversation_id}/status")

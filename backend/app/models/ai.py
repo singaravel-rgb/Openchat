@@ -17,6 +17,7 @@ class AIConfig(Base):
     model: Mapped[str] = mapped_column(String(100), default="gpt-4o-mini", server_default="gpt-4o-mini", nullable=False)
     openai_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     anthropic_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gemini_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     temperature: Mapped[float] = mapped_column(Float, default=0.3, server_default="0.3", nullable=False)
     max_tokens: Mapped[int] = mapped_column(Integer, default=500, server_default="500", nullable=False)
     system_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)

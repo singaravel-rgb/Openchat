@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -26,6 +26,29 @@ class User(Base):
     )
     password_hash: Mapped[str] = mapped_column(
         String(255), nullable=False
+    )
+
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    last_role_changed_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    role_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_by = relationship(
+        "User",
+        remote_side=[id],
+        foreign_keys=[created_by_id],
+        uselist=False,
+    )
+    last_role_changed_by = relationship(
+        "User",
+        remote_side=[id],
+        foreign_keys=[last_role_changed_by_id],
+        uselist=False,
     )
 
     agent_profile = relationship(

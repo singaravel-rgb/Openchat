@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import MessageSenderType, MessageType
 from app.db.base import Base
+from app.models.user import User
 
 
 class Message(Base):
@@ -20,6 +21,12 @@ class Message(Base):
     conversation_id: Mapped[int] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+
+    original_conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 
@@ -82,6 +89,7 @@ class Message(Base):
     conversation = relationship(
         "Conversation",
         back_populates="messages",
+        foreign_keys=[conversation_id],
     )
 
     sender = relationship(

@@ -30,6 +30,10 @@ def _get_or_create_user(db, email, role, name, password="password123"):
         db.add(u)
         db.commit()
         db.refresh(u)
+    else:
+        u.password_hash = hash_password(password)
+        u.is_active = True
+        db.commit()
     if role == "agent":
         profile = db.query(AgentProfile).filter(AgentProfile.user_id == u.id).first()
         if not profile:

@@ -54,7 +54,7 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
       router.push('/login');
     } else if (user && user.role === 'customer') {
       router.push('/customer');
-    } else if (user && user.role === 'admin' && pathname.startsWith('/agent')) {
+    } else if (user && (user.role === 'admin' || user.role === 'super_admin') && pathname.startsWith('/agent')) {
       router.push('/admin');
     }
   }, [user, isLoading, router, pathname]);
@@ -90,7 +90,7 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
     );
   }
 
-  if (!user || (user.role !== 'agent' && user.role !== 'admin')) {
+  if (!user || (user.role !== 'agent' && user.role !== 'admin' && user.role !== 'super_admin')) {
     router.push('/login');
     return null;
   }

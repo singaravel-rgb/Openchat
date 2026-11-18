@@ -8,6 +8,7 @@ from app.api.v1.admin import router as admin_router
 from app.api.v1.admin_knowledge import router as admin_knowledge_router
 from app.api.v1.admin_ai import router as admin_ai_router
 from app.api.v1.admin_settings import router as admin_settings_router
+from app.api.v1.admin_users import router as admin_users_router
 from app.api.v1.customer_knowledge import router as customer_knowledge_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.sla import router as sla_router
@@ -23,6 +24,7 @@ from app.api.v1.bot_flows import router as bot_flows_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.automation_rules import router as automation_rules_router
 from app.api.v1.campaigns import router as campaigns_router
+from app.api.v1.admin_integrations import router as admin_integrations_router
 
 
 api_router = APIRouter()
@@ -35,6 +37,7 @@ api_router.include_router(admin_router)
 api_router.include_router(admin_knowledge_router)
 api_router.include_router(admin_ai_router)
 api_router.include_router(admin_settings_router)
+api_router.include_router(admin_users_router)
 api_router.include_router(customer_knowledge_router)
 api_router.include_router(notifications_router)
 api_router.include_router(sla_router)
@@ -50,3 +53,4 @@ api_router.include_router(bot_flows_router)
 api_router.include_router(webhooks_router)
 api_router.include_router(automation_rules_router)
 api_router.include_router(campaigns_router)
+api_router.include_router(admin_integrations_router)

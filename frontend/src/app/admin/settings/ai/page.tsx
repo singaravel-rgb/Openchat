@@ -21,8 +21,10 @@ interface AIConfig {
   escalation_rules: Record<string, unknown>;
   max_response_length: number;
   knowledge_sources: Record<string, unknown>;
+  has_gemini_api_key?: boolean;
   has_openai_api_key: boolean;
   has_anthropic_api_key: boolean;
+  gemini_api_key_masked?: string | null;
   openai_api_key_masked: string | null;
   anthropic_api_key_masked: string | null;
   provider_available: boolean;
@@ -37,6 +39,7 @@ interface FormData {
   ai_enabled: boolean;
   provider: string;
   model: string;
+  gemini_api_key: string;
   openai_api_key: string;
   anthropic_api_key: string;
   temperature: string;
@@ -50,14 +53,15 @@ interface FormData {
 }
 
 const TONES = ['professional', 'friendly', 'casual', 'formal'];
-const PROVIDERS = ['demo', 'openai', 'anthropic'];
+const PROVIDERS = ['gemini', 'demo', 'openai', 'anthropic'];
 
 export default function AIConfigurationPage() {
   const [config, setConfig] = useState<AIConfig | null>(null);
   const [form, setForm] = useState<FormData>({
     ai_enabled: true,
-    provider: 'demo',
-    model: 'gpt-4o-mini',
+    provider: 'gemini',
+    model: 'gemini-flash-latest',
+    gemini_api_key: '',
     openai_api_key: '',
     anthropic_api_key: '',
     temperature: '0.3',
@@ -88,6 +92,7 @@ export default function AIConfigurationPage() {
         ai_enabled: data.ai_enabled,
         provider: data.provider,
         model: data.model,
+        gemini_api_key: '',
         openai_api_key: '',
         anthropic_api_key: '',
         temperature: String(data.temperature),
@@ -132,6 +137,7 @@ export default function AIConfigurationPage() {
         supported_languages: form.supported_languages.split(',').map(s => s.trim()).filter(Boolean),
         confidence_threshold: parseFloat(form.confidence_threshold),
         max_response_length: parseInt(form.max_response_length, 10),
+        gemini_api_key: form.gemini_api_key || undefined,
         openai_api_key: form.openai_api_key || undefined,
         anthropic_api_key: form.anthropic_api_key || undefined,
       };
@@ -152,6 +158,7 @@ export default function AIConfigurationPage() {
       const payload = {
         provider: form.provider,
         model: form.model,
+        gemini_api_key: form.gemini_api_key || undefined,
         openai_api_key: form.openai_api_key || undefined,
         anthropic_api_key: form.anthropic_api_key || undefined,
       };
@@ -188,17 +195,79 @@ export default function AIConfigurationPage() {
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Provider</label>
             <select
               value={form.provider}
-              onChange={e => handleChange('provider', e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={e => {
+                const prov = e.target.value;
+                handleChange('provider', prov);
+                if (prov === 'gemini' && (!form.model || form.model === 'gpt-4o-mini' || form.model === 'demo')) {
+                  handleChange('model', 'gemini-flash-latest');
+                } else if (prov === 'openai' && (!form.model || form.model === 'gemini-flash-latest' || form.model === 'demo')) {
+                  handleChange('model', 'gpt-4o-mini');
+                } else if (prov === 'anthropic' && (!form.model || form.model === 'gemini-flash-latest' || form.model === 'demo')) {
+                  handleChange('model', 'claude-3-5-sonnet');
+                }
+              }}
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
               disabled={saving || testing}
             >
-              <option value="demo">Demo Mode (Built-in)</option>
+              <option value="gemini">Google Gemini (Recommended / Primary)</option>
+              <option value="demo">Demo Mode (Built-in Testing)</option>
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
             </select>
             <p className="text-sm text-slate-500 mt-1">
-              Demo mode uses built-in responses. Select OpenAI or Anthropic for production AI.
+              Google Gemini is our primary AI provider for grounded knowledge answering.
             </p>
+          </div>
+
+          {/* Google Gemini Configuration */}
+          <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>Google Gemini Configuration</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 font-semibold">Primary</span>
+                </h3>
+                <p className="text-sm text-slate-500">Official Google Gemini API for fast, reliable customer resolution</p>
+              </div>
+              {config?.has_gemini_api_key && (
+                <span className="text-xs px-2.5 py-1 rounded-md bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 font-medium">
+                  API Key Saved
+                </span>
+              )}
+            </div>
+            <div className="space-y-4">
+              <Input
+                label="Gemini API Key"
+                placeholder={config?.has_gemini_api_key ? config.gemini_api_key_masked || '••••••••' : 'AIzaSy... or AQ...'}
+                type="password"
+                value={form.gemini_api_key}
+                onChange={e => handleInputChange('gemini_api_key', e)}
+                disabled={saving || testing}
+              />
+              <Input
+                label="Model"
+                value={form.model}
+                onChange={e => handleInputChange('model', e)}
+                placeholder="gemini-flash-latest"
+                disabled={saving || testing}
+              />
+              <div className="flex flex-wrap gap-2 pt-1">
+                {['gemini-flash-latest', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'].map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleChange('model', m)}
+                    className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                      form.model === m
+                        ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700 font-medium'
+                        : 'border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="border-t border-slate-200 dark:border-slate-800 pt-6">

@@ -21,6 +21,7 @@ from app.schemas.conversation import (
     MessageResponse,
     ConversationUpdate,
     GlobalNoteUpdate,
+    ConversationLinkItem,
 )
 from app.schemas.csat import CSATRatingCreate, CSATRatingResponse
 from app.services.conversation_service import (
@@ -33,6 +34,7 @@ from app.services.conversation_service import (
     update_conversation_properties,
     reopen_conversation,
     update_global_note,
+    get_linked_conversations_for_conversation,
 )
 from app.services.sla_service import apply_sla_to_conversation
 
@@ -137,6 +139,11 @@ def get_conversation(
         last_message=item.get("last_message"),
         last_message_at=item.get("last_message_at"),
         unread_count=item.get("unread_count", 0),
+        merged_into_id=getattr(conversation, "merged_into_id", None),
+        linked_conversations=[
+            ConversationLinkItem.model_validate(l)
+            for l in get_linked_conversations_for_conversation(db, conversation.id)
+        ] if include_internal else None,
     )
 
 

@@ -7,9 +7,8 @@ import { Input } from '@/components/Input';
 import { Badge } from '@/components/Badge';
 import { Avatar } from '@/components/Avatar';
 import { format, formatDistanceToNow, isValid, parseISO } from 'date-fns';
-import type { ConversationListItem, Message, CannedResponse, Attachment, ConversationCustomFieldValue, GlobalNoteResponse } from '@/lib/types';
-import { conversationApi,   agentApi,
-  attachmentApi, adminApi, cannedResponseApi } from '@/lib/api';
+import type { ConversationListItem, Message, CannedResponse, Attachment, ConversationCustomFieldValue, GlobalNoteResponse, ConversationLinkItem } from '@/lib/types';
+import { conversationApi, agentApi, attachmentApi, adminApi, cannedResponseApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 const QUEUE_OPTIONS = [
@@ -214,6 +213,20 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const conversationListRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const activeConversationIdRef = useRef<number | null>(null);
+  const requestSeqRef = useRef<number>(0);
+  const isNearBottomRef = useRef<boolean>(true);
+
+  // Link & Merge state
+  const [linkedConversations, setLinkedConversations] = useState<ConversationLinkItem[]>([]);
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [linkTargetId, setLinkTargetId] = useState('');
+  const [isLinking, setIsLinking] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [confirmCrossCustomer, setConfirmCrossCustomer] = useState(false);
+  const [confirmMergeExplicit, setConfirmMergeExplicit] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
 
   // Determine current queue from URL
   const currentQueueFromUrl = useMemo(() => {
@@ -243,10 +256,10 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   }, []);
 
   // Load conversations for current queue
-  const loadConversations = useCallback(async (isRetry = false) => {
+  const loadConversations = useCallback(async (isRetry = false, isBackground = false) => {
     if (isRetry) {
       setRetryCount(c => c + 1);
-    } else {
+    } else if (!isBackground) {
       setIsLoading(true);
       setError(null);
       setRetryCount(0);
@@ -268,11 +281,13 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       }
       setConversations(data);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load conversations';
-      setError(errorMessage);
-      console.error('[ThreePanelWorkspace] Failed to load conversations:', err);
+      if (!isBackground) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load conversations';
+        setError(errorMessage);
+        console.error('[ThreePanelWorkspace] Failed to load conversations:', err);
+      }
     } finally {
-      if (!isRetry) {
+      if (!isRetry && !isBackground) {
         setIsLoading(false);
       }
     }
@@ -280,6 +295,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
 
   // Load single conversation detail
   const loadConversation = useCallback(async (id: number) => {
+    const seq = ++requestSeqRef.current;
+    activeConversationIdRef.current = id;
     setIsLoadingConversation(true);
     setError(null);
     try {
@@ -291,37 +308,45 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       } else {
         detail = await conversationApi.get(id);
       }
-      const existing = conversations.find(c => c.id === id) || null;
-      // A conversation opened from a notification/URL may not be part of the
-      // active queue; build the card from the detail payload (which now carries
-      // the same fields as the inbox list) so it can still be selected.
-      const fromDetail: ConversationListItem = {
-        id: detail.id,
-        customer_id: detail.customer_id,
-        assigned_agent_id: detail.assigned_agent_id ?? null,
-        assigned_agent_name: detail.assigned_agent_name ?? null,
-        subject: detail.subject ?? null,
-        status: detail.status,
-        channel: detail.channel ?? null,
-        priority: detail.priority ?? 'normal',
-        tags: detail.tags ?? [],
-        resolution_details: detail.resolution_details ?? null,
-        created_at: detail.created_at,
-        updated_at: detail.updated_at,
-        resolved_at: detail.resolved_at ?? null,
-        closed_at: detail.closed_at ?? null,
-        customer_last_read_at: detail.customer_last_read_at ?? null,
-        agent_last_read_at: detail.agent_last_read_at ?? null,
-        customer_name: detail.customer_name || existing?.customer_name || 'Unknown Customer',
-        customer_email: detail.customer_email || existing?.customer_email || '',
-        last_message: detail.last_message ?? existing?.last_message ?? null,
-        last_message_at: detail.last_message_at ?? existing?.last_message_at ?? null,
-        unread_count: detail.unread_count ?? existing?.unread_count ?? 0,
-      };
-      if (!existing) {
-        setConversations(prev => [fromDetail, ...prev.filter(c => c.id !== id)]);
+
+      // Drop stale responses if user switched conversations quickly
+      if (seq !== requestSeqRef.current || activeConversationIdRef.current !== id) {
+        return;
       }
-      setSelectedConversation(existing || fromDetail);
+
+      setConversations((prev) => {
+        const existing = prev.find((c) => c.id === id) || null;
+        const fromDetail: ConversationListItem = {
+          id: detail.id,
+          customer_id: detail.customer_id,
+          assigned_agent_id: detail.assigned_agent_id ?? null,
+          assigned_agent_name: detail.assigned_agent_name ?? null,
+          subject: detail.subject ?? null,
+          status: detail.status,
+          channel: detail.channel ?? null,
+          priority: detail.priority ?? 'normal',
+          tags: detail.tags ?? [],
+          resolution_details: detail.resolution_details ?? null,
+          created_at: detail.created_at,
+          updated_at: detail.updated_at,
+          resolved_at: detail.resolved_at ?? null,
+          closed_at: detail.closed_at ?? null,
+          customer_last_read_at: detail.customer_last_read_at ?? null,
+          agent_last_read_at: detail.agent_last_read_at ?? null,
+          customer_name: detail.customer_name || existing?.customer_name || 'Unknown Customer',
+          customer_email: detail.customer_email || existing?.customer_email || '',
+          last_message: detail.last_message ?? existing?.last_message ?? null,
+          last_message_at: detail.last_message_at ?? existing?.last_message_at ?? null,
+          unread_count: detail.unread_count ?? existing?.unread_count ?? 0,
+          merged_into_id: detail.merged_into_id ?? existing?.merged_into_id ?? null,
+        };
+        setSelectedConversation(existing || fromDetail);
+        if (!existing) {
+          return [fromDetail, ...prev.filter((c) => c.id !== id)];
+        }
+        return prev.map((c) => (c.id === id ? { ...c, ...fromDetail } : c));
+      });
+
       setMessages(detail.messages || []);
       setAttachments(detail.attachments || []);
       setCustomFields(detail.custom_fields || []);
@@ -330,15 +355,20 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setGlobalNoteDraft(detail.global_note || '');
       setGlobalNoteUpdatedAt(detail.global_note_updated_at || null);
       setGlobalNoteUpdatedByName(detail.global_note_updated_by_name || null);
+      setLinkedConversations(detail.linked_conversations || []);
       setIsEditingGlobalNote(false);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load conversation';
-      setError(errorMessage);
-      console.error('[ThreePanelWorkspace] Failed to load conversation:', err);
+      if (seq === requestSeqRef.current) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load conversation';
+        setError(errorMessage);
+        console.error('[ThreePanelWorkspace] Failed to load conversation:', err);
+      }
     } finally {
-      setIsLoadingConversation(false);
+      if (seq === requestSeqRef.current) {
+        setIsLoadingConversation(false);
+      }
     }
-  }, [userRole, conversations]);
+  }, [userRole]);
 
   useEffect(() => {
     if (!rightDetailsSection) return;
@@ -618,17 +648,31 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     loadAgents();
   }, [loadConversations, loadCannedResponses, loadAgents]);
 
-  // Load conversation when selected
+  // Periodic background polling for new incoming conversations in queue/all chats
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadConversations(false, true);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [loadConversations]);
+
+  // Load conversation when selected (with duplicate fetch prevention)
+  const lastLoadedIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (selectedConversation) {
-      loadConversation(selectedConversation.id);
+      if (lastLoadedIdRef.current !== selectedConversation.id) {
+        lastLoadedIdRef.current = selectedConversation.id;
+        loadConversation(selectedConversation.id);
+      }
     } else {
+      lastLoadedIdRef.current = null;
       setMessages([]);
       setAttachments([]);
       setCustomFields([]);
       setAssignmentHistory([]);
+      setLinkedConversations([]);
     }
-  }, [selectedConversation, loadConversation]);
+  }, [selectedConversation?.id, loadConversation]);
 
   // Light polling keeps new customer/agent messages visible without touching composer state
   useEffect(() => {
@@ -636,14 +680,16 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     const conversationId = selectedConversation.id;
     const interval = setInterval(async () => {
       try {
+        if (activeConversationIdRef.current !== conversationId) return;
         const detail =
           userRole === 'admin'
             ? await adminApi.getConversation(conversationId)
             : await agentApi.getConversation(conversationId);
+        if (activeConversationIdRef.current !== conversationId) return;
         setMessages((prev) => {
           if (
             prev.length === detail.messages.length &&
-            prev.every((m, i) => m.id === detail.messages[i].id)
+            prev.every((m, i) => m.id === detail.messages[i].id && m.content === detail.messages[i].content)
           ) {
             return prev;
           }
@@ -652,35 +698,107 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         setAttachments((prev) =>
           prev.length === (detail.attachments || []).length ? prev : detail.attachments || [],
         );
+        if (detail.linked_conversations) {
+          setLinkedConversations(detail.linked_conversations);
+        }
       } catch {
         // ignore transient polling failures
       }
     }, 15000);
     return () => clearInterval(interval);
-  }, [selectedConversation, isLoadingConversation, userRole]);
+  }, [selectedConversation?.id, isLoadingConversation, userRole]);
 
   // Handle initial conversation from URL
   useEffect(() => {
     const convId = params.id ? parseInt(Array.isArray(params.id) ? params.id[0] : params.id, 10) : null;
-    if (convId && !selectedConversation) {
+    if (convId && (!selectedConversation || selectedConversation.id !== convId)) {
+      lastLoadedIdRef.current = convId;
       loadConversation(convId);
     }
   }, [params.id, selectedConversation, loadConversation]);
 
-  // Auto-scroll messages
+  // Auto-scroll messages only when user is near bottom
   useEffect(() => {
-    if (messagesEndRef.current) {
+    if (isNearBottomRef.current && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
 
   const handleSelectConversation = useCallback((conv: ConversationListItem) => {
+    lastLoadedIdRef.current = conv.id;
     setSelectedConversation(conv);
     loadConversation(conv.id);
     // Update URL
     const basePath = userRole === 'admin' ? '/admin' : '/agent';
     router.push(`${basePath}/conversations/${conv.id}`);
   }, [router, userRole, loadConversation]);
+
+  // Link & Merge handlers
+  const handleLinkConversation = useCallback(async () => {
+    if (!selectedConversation || !linkTargetId.trim()) return;
+    const targetIdNum = parseInt(linkTargetId.trim(), 10);
+    if (!targetIdNum || isNaN(targetIdNum)) {
+      setError('Please enter a valid numeric conversation ID');
+      return;
+    }
+    setIsLinking(true);
+    setError(null);
+    try {
+      await agentApi.linkConversation(selectedConversation.id, targetIdNum);
+      setShowLinkModal(false);
+      setLinkTargetId('');
+      const links = await agentApi.listLinks(selectedConversation.id);
+      setLinkedConversations(links);
+      await loadConversation(selectedConversation.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to link conversation');
+    } finally {
+      setIsLinking(false);
+    }
+  }, [selectedConversation, linkTargetId, loadConversation]);
+
+  const handleUnlinkConversation = useCallback(async (targetId: number) => {
+    if (!selectedConversation) return;
+    try {
+      await agentApi.unlinkConversation(selectedConversation.id, targetId);
+      const links = await agentApi.listLinks(selectedConversation.id);
+      setLinkedConversations(links);
+      await loadConversation(selectedConversation.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unlink conversation');
+    }
+  }, [selectedConversation, loadConversation]);
+
+  const handleMergeConversation = useCallback(async () => {
+    if (!selectedConversation || !mergeTargetId.trim() || !confirmMergeExplicit) return;
+    const targetIdNum = parseInt(mergeTargetId.trim(), 10);
+    if (!targetIdNum || isNaN(targetIdNum)) {
+      setError('Please enter a valid numeric target conversation ID');
+      return;
+    }
+    setIsMerging(true);
+    setError(null);
+    try {
+      await agentApi.mergeConversation(
+        selectedConversation.id,
+        targetIdNum,
+        confirmCrossCustomer,
+      );
+      setShowMergeModal(false);
+      setMergeTargetId('');
+      setConfirmCrossCustomer(false);
+      setConfirmMergeExplicit(false);
+      await loadConversations();
+      lastLoadedIdRef.current = targetIdNum;
+      await loadConversation(targetIdNum);
+      const basePath = userRole === 'admin' ? '/admin' : '/agent';
+      router.push(`${basePath}/conversations/${targetIdNum}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to merge conversations');
+    } finally {
+      setIsMerging(false);
+    }
+  }, [selectedConversation, mergeTargetId, confirmCrossCustomer, confirmMergeExplicit, loadConversations, loadConversation, router, userRole]);
 
   const handleQueueChange = useCallback((newQueue: QueueValue) => {
     setQueue(newQueue);
@@ -1175,7 +1293,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     size="md"
                     className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex-shrink-0"
                   />
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-[120px] flex-1">
                     <h2 className="text-base font-semibold text-slate-900 dark:text-white truncate">
                       {selectedConversation.subject || 'No Subject'}
                     </h2>
@@ -1196,7 +1314,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1.5 flex-shrink min-w-0">
                   {selectedConversation.status === 'pending' && userRole === 'agent' && (
                     <Button variant="outline" size="sm" onClick={handleTake}>
                       Take
@@ -1299,6 +1417,25 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     <Button
                       variant="ghost"
                       size="sm"
+                      className="px-2 text-xs"
+                      onClick={() => { setLinkTargetId(''); setShowLinkModal(true); }}
+                      title="Link related conversation"
+                    >
+                      🔗 Link conversation
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="px-2 text-xs"
+                      onClick={() => { setMergeTargetId(''); setConfirmCrossCustomer(false); setConfirmMergeExplicit(false); setShowMergeModal(true); }}
+                      title="Merge duplicate conversation"
+                      disabled={selectedConversation.status === 'merged' || Boolean(selectedConversation.merged_into_id)}
+                    >
+                      🔀 Merge conversation
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="px-2"
                       onClick={() => {
                         setRightPanelOpen((v) => !v);
@@ -1314,14 +1451,42 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 </div>
               </div>
 
+              {/* Merged Banner */}
+              {selectedConversation.merged_into_id && (
+                <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800/60 px-4 py-2 flex items-center justify-between text-xs text-amber-800 dark:text-amber-200 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-amber-700 dark:text-amber-300">MERGED:</span>
+                    <span>This conversation was merged into <strong>#{selectedConversation.merged_into_id}</strong>.</span>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-6 text-[11px] px-2"
+                    onClick={() => handleSelectConversation({ id: selectedConversation.merged_into_id! } as ConversationListItem)}
+                  >
+                    View Conversation #{selectedConversation.merged_into_id} →
+                  </Button>
+                </div>
+              )}
+
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={messagesContainerRef} role="log" aria-live="polite">
-              {isLoadingConversation && messages.length === 0 && (
+            <div
+              className="flex-1 overflow-y-auto p-4 space-y-4"
+              ref={messagesContainerRef}
+              role="log"
+              aria-live="polite"
+              onScroll={() => {
+                const el = messagesContainerRef.current;
+                if (el) {
+                  isNearBottomRef.current = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 150;
+                }
+              }}
+            >
+              {isLoadingConversation && messages.length === 0 ? (
                 <div className="flex items-center justify-center h-32 text-slate-500 dark:text-slate-400">
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-600 border-t-transparent"></div>
                 </div>
-              )}
-              {!isLoadingConversation && messages.length === 0 && (
+              ) : messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-32 text-slate-500 dark:text-slate-400">
                   <div className="w-16 h-16 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-2xl mb-4">
                     💬
@@ -1329,9 +1494,14 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   <p className="text-lg font-medium text-slate-900 dark:text-white">No messages yet</p>
                   <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Start the conversation by sending a message below</p>
                 </div>
-              )}
-              {!isLoadingConversation &&
-                messages.map((message) => {
+              ) : (
+                <>
+                  {isLoadingConversation && (
+                    <div className="sticky top-0 z-10 flex items-center justify-center py-1 bg-blue-50/80 dark:bg-blue-900/30 backdrop-blur text-xs text-blue-600 dark:text-blue-400 border-b border-blue-100 dark:border-blue-800 rounded">
+                      <span className="animate-pulse">Refreshing…</span>
+                    </div>
+                  )}
+                  {messages.map((message) => {
                   const info = senderInfo(message);
                   const isSystemEvent =
                     message.message_type === 'system_event' || String(message.sender_type) === 'system';
@@ -1502,6 +1672,11 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                               </Badge>
                             )}
                             <div className="whitespace-pre-wrap">{cleanDemoPrefix(message.content)}</div>
+                            {message.original_conversation_id && message.original_conversation_id !== selectedConversation?.id && (
+                              <span className="block mt-1 text-[10px] text-slate-400 italic">
+                                (merged from #{message.original_conversation_id})
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1525,6 +1700,11 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                         </div>
                         <div className="rounded-lg rounded-tr-none bg-blue-600 text-white p-3 shadow-sm text-sm whitespace-pre-wrap">
                           {message.content}
+                          {message.original_conversation_id && message.original_conversation_id !== selectedConversation?.id && (
+                            <span className="block mt-1 text-[10px] text-blue-200 italic">
+                              (merged from #{message.original_conversation_id})
+                            </span>
+                          )}
                         </div>
                       </div>
                       <Avatar
@@ -1535,6 +1715,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     </div>
                   );
                 })}
+              </>
+            )}
               <div ref={messagesEndRef} />
             </div>
 
@@ -1915,6 +2097,54 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                           )}
                         </div>
                       )}
+                   </div>
+                 </div>
+
+                 {/* Linked Conversations */}
+                 <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                   <div className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                     <span>Linked Conversations ({linkedConversations.length})</span>
+                     <Button
+                       variant="ghost"
+                       size="sm"
+                       className="h-6 text-[11px] px-2"
+                       onClick={() => { setLinkTargetId(''); setShowLinkModal(true); }}
+                     >
+                       + Link conversation
+                     </Button>
+                   </div>
+                   <div className="mt-2 space-y-2 text-xs">
+                     {linkedConversations.length === 0 ? (
+                       <p className="text-slate-400 dark:text-slate-500 italic py-1">No linked conversations</p>
+                     ) : (
+                       linkedConversations.map((link) => (
+                         <div
+                           key={link.id}
+                           className="flex items-center justify-between gap-2 p-2 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+                         >
+                           <button
+                             type="button"
+                             onClick={() => handleSelectConversation({ id: link.linked_conversation_id } as ConversationListItem)}
+                             className="text-left font-medium text-blue-600 dark:text-blue-400 hover:underline truncate"
+                             title={`Go to conversation #${link.linked_conversation_id}`}
+                           >
+                             #{link.linked_conversation_id} • {link.subject || link.customer_name || 'Conversation'}
+                             <span className="block text-[10px] text-slate-400 font-normal">
+                               Status: {link.status}
+                             </span>
+                           </button>
+                           <Button
+                             variant="ghost"
+                             size="sm"
+                             className="h-5 px-1.5 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                             onClick={() => handleUnlinkConversation(link.linked_conversation_id)}
+                             title="Unlink"
+                           >
+                             Unlink
+                           </Button>
+                         </div>
+                       ))
+                     )}
                    </div>
                  </div>
 
@@ -2359,6 +2589,142 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
           </div>
         </div>
       )}
+
+      {showLinkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-md w-full">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Link Related Conversation</h2>
+              <Button variant="ghost" size="sm" onClick={() => setShowLinkModal(false)}>
+                ✕
+              </Button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Linking connects two conversations so agents can quickly navigate between them. Histories and messages remain separate.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Target Conversation ID
+                </label>
+                <Input
+                  value={linkTargetId}
+                  onChange={(e) => setLinkTargetId(e.target.value)}
+                  placeholder="e.g. 42"
+                  className="w-full"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleLinkConversation();
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                <Button variant="secondary" onClick={() => setShowLinkModal(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleLinkConversation} disabled={isLinking || !linkTargetId.trim()}>
+                  {isLinking ? 'Linking...' : 'Link conversation'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMergeModal && (() => {
+        const targetConv = conversations.find(c => String(c.id) === mergeTargetId.trim());
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-lg w-full">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Merge Conversation</h2>
+                <Button variant="ghost" size="sm" onClick={() => setShowMergeModal(false)}>
+                  ✕
+                </Button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-200">
+                  <strong>Warning:</strong> All messages, notes, and attachments from this conversation (#{selectedConversation?.id}) will be moved into the target conversation. This conversation will be permanently marked as <strong>Merged</strong> and closed for new replies.
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Target Conversation ID to Merge Into
+                  </label>
+                  <Input
+                    value={mergeTargetId}
+                    onChange={(e) => setMergeTargetId(e.target.value)}
+                    placeholder="e.g. 101"
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Source & Target Comparison Details */}
+                <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+                  <div className="font-semibold text-slate-700 dark:text-slate-300">Merge Comparison</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <div className="font-semibold text-slate-900 dark:text-white mb-1">Source (Will be Closed)</div>
+                      <div className="text-slate-600 dark:text-slate-400"><strong>ID:</strong> #{selectedConversation?.id}</div>
+                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Subject:</strong> {selectedConversation?.subject || 'No subject'}</div>
+                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Customer:</strong> {selectedConversation?.customer_name || 'Customer'} {selectedConversation?.customer_email ? `(${selectedConversation.customer_email})` : ''}</div>
+                    </div>
+                    <div className="p-2 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <div className="font-semibold text-slate-900 dark:text-white mb-1">Target (Will Receive Messages)</div>
+                      <div className="text-slate-600 dark:text-slate-400"><strong>ID:</strong> {mergeTargetId.trim() ? `#${mergeTargetId.trim()}` : '—'}</div>
+                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Subject:</strong> {targetConv?.subject || (mergeTargetId.trim() ? 'Target conversation' : '—')}</div>
+                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Customer:</strong> {targetConv ? `${targetConv.customer_name} (${targetConv.customer_email || 'No email'})` : (mergeTargetId.trim() ? 'Verified on merge' : '—')}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Explicit confirmation requirement */}
+                <div className="flex items-start gap-2 pt-1 p-2 rounded bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/40">
+                  <input
+                    id="confirm-merge-explicit"
+                    type="checkbox"
+                    checked={confirmMergeExplicit}
+                    onChange={(e) => setConfirmMergeExplicit(e.target.checked)}
+                    className="mt-0.5 rounded border-red-300 text-red-600 focus:ring-red-500"
+                  />
+                  <label htmlFor="confirm-merge-explicit" className="text-xs text-red-900 dark:text-red-200 font-medium cursor-pointer">
+                    I confirm that I want to merge Source #{selectedConversation?.id} into Target #{mergeTargetId.trim() || '___'}, moving all messages and closing Source #{selectedConversation?.id}.
+                  </label>
+                </div>
+
+                <div className="flex items-start gap-2 pt-1">
+                  <input
+                    id="confirm-cross-customer"
+                    type="checkbox"
+                    checked={confirmCrossCustomer}
+                    onChange={(e) => setConfirmCrossCustomer(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="confirm-cross-customer" className="text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                    Confirm cross-customer merge (if target conversation belongs to a different customer account, administrator permission required)
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <Button variant="secondary" onClick={() => setShowMergeModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={handleMergeConversation}
+                    disabled={isMerging || !mergeTargetId.trim() || !confirmMergeExplicit}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {isMerging ? 'Merging...' : 'Merge conversation'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

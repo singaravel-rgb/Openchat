@@ -119,7 +119,7 @@ This guide covers the complete end-to-end demo journey for OpenChat, demonstrati
 
 **Step 10: Agent Resolves Conversation**
 1. In agent view: Click **"Resolve"** button
-2. Add resolution details: "Order issue resolved, refund processed"
+2. Add resolution details: "Order issue addressed and customer inquiry answered"
 3. Click **Resolve**
 4. Conversation status changes to "Resolved"
 5. Removed from agent's active queue

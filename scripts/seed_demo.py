@@ -17,10 +17,17 @@ from app.models.knowledge import Article, Category, FAQ
 from app.models.message import Message
 from app.models.notification import Notification
 from app.models.user import User
+import os
+from app.core.config import settings
 from app.core.enums import ArticleStatus, ArticleVisibility, ConversationStatus, MessageSenderType, MessageType
 
 
 def seed_demo_data():
+    if os.environ.get("ALLOW_DEMO_SEED") != "1" or settings.environment.lower() != "development":
+        raise RuntimeError(
+            "Demo data seeding is strictly disabled in production and support-team environments. "
+            "To seed demo data in local dev only, run with ALLOW_DEMO_SEED=1 and ENVIRONMENT=development."
+        )
     db = SessionLocal()
     try:
         # Create demo users
