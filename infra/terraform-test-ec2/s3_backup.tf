@@ -34,7 +34,7 @@ resource "aws_s3_bucket_public_access_block" "db_backups" {
   restrict_public_buckets = true
 }
 
-# 7-day retention lifecycle for test backups
+# 7-day retention lifecycle for test backups (includes noncurrent versions)
 resource "aws_s3_bucket_lifecycle_configuration" "db_backups" {
   bucket = aws_s3_bucket.db_backups.id
 
@@ -46,6 +46,14 @@ resource "aws_s3_bucket_lifecycle_configuration" "db_backups" {
 
     expiration {
       days = 7
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 2
     }
   }
 }

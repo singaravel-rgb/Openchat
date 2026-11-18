@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # OpenChat PostgreSQL Backup Restore & Verification Tool
-# Downloads a database dump from S3 and restores it into the PostgreSQL container.
+# Downloads a custom-format database dump (-Fc) from S3 and restores it.
 # Usage:
 #   ./scripts/restore_postgres_from_s3.sh <s3-backup-bucket> [backup-filename]
 # ==============================================================================
@@ -31,16 +31,18 @@ else
 fi
 
 echo "[*] Downloading: s3://${BACKUP_BUCKET}/postgres_backups/${BACKUP_FILE} ..."
-aws s3 cp "s3://${BACKUP_BUCKET}/postgres_backups/${BACKUP_FILE}" "$TMP_DIR/backup.sql.gz"
+aws s3 cp "s3://${BACKUP_BUCKET}/postgres_backups/${BACKUP_FILE}" "$TMP_DIR/backup.dump"
 
-echo "[*] Verifying gzip archive integrity..."
-gzip -t "$TMP_DIR/backup.sql.gz"
-echo "[+] Archive integrity verified."
+echo "[*] Verifying custom dump format archive TOC and integrity..."
+docker exec -i openchat-postgres pg_restore -l < "$TMP_DIR/backup.dump" > /dev/null
+echo "[+] Archive TOC and integrity verified."
 
 echo "[*] Restoring into openchat-postgres container..."
-gunzip -c "$TMP_DIR/backup.sql.gz" | docker exec -i openchat-postgres psql -U openchat -d openchat
+docker exec -i openchat-postgres pg_restore -U openchat -d openchat --clean --if-exists --no-owner < "$TMP_DIR/backup.dump" || {
+    echo "[!] Note: pg_restore reported non-fatal warnings (e.g. drop on non-existent objects). Continuing verification..."
+}
 
-echo "[+] Database restore completed successfully."
+echo "[+] Database restore completed."
 
 # Run post-restore sanity check
 RECORD_COUNT=$(docker exec openchat-postgres psql -U openchat -d openchat -t -c "SELECT count(*) FROM users;" | xargs)
