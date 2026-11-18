@@ -92,15 +92,16 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Policy for S3 database backups
-resource "aws_iam_role_policy" "backup_s3" {
-  name = "${var.project_name}-backup-policy"
+# Policy for S3 database backups & SSM Parameter Store runtime secrets
+resource "aws_iam_role_policy" "backup_and_secrets" {
+  name = "${var.project_name}-host-policy"
   role = aws_iam_role.test_host.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "S3Backups"
         Effect = "Allow"
         Action = [
           "s3:PutObject",
@@ -110,6 +111,17 @@ resource "aws_iam_role_policy" "backup_s3" {
         Resource = [
           aws_s3_bucket.db_backups.arn,
           "${aws_s3_bucket.db_backups.arn}/*"
+        ]
+      },
+      {
+        Sid    = "SSMSecrets"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters"
+        ]
+        Resource = [
+          aws_ssm_parameter.test_env.arn
         ]
       }
     ]
@@ -146,11 +158,16 @@ resource "aws_instance" "test_host" {
   user_data = <<-EOF
               #!/bin/bash
               set -e
-              # System updates
+              # System updates & core dependencies
               apt-get update -y
-              apt-get install -y ca-certificates curl gnupg lsb-release git jq
+              apt-get install -y ca-certificates curl gnupg lsb-release git jq awscli openssl cron snapd
 
-              # Install Docker & Docker Compose
+              # Ensure AWS Systems Manager (SSM) Agent is active
+              snap install amazon-ssm-agent --classic || true
+              systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+              systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+
+              # Install Docker & Docker Compose Plugin
               mkdir -p /etc/apt/keyrings
               curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
               echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
@@ -160,12 +177,27 @@ resource "aws_instance" "test_host" {
               systemctl enable docker
               systemctl start docker
 
-              # AWS CLI
-              apt-get install -y awscli
-
-              # Prepare app directory
-              mkdir -p /opt/openchat
+              # Setup application directories
+              mkdir -p /opt/openchat/nginx/ssl /opt/openchat/nginx/certbot /opt/openchat/scripts
               chown -R ubuntu:ubuntu /opt/openchat
+
+              # Retrieve runtime secrets securely from AWS SSM Parameter Store (never embedded in git)
+              aws ssm get-parameter --name "/${var.project_name}/env" --with-decryption --region "${var.aws_region}" --query Parameter.Value --output text > /opt/openchat/.env
+              chmod 600 /opt/openchat/.env
+              chown ubuntu:ubuntu /opt/openchat/.env
+
+              # Generate initial self-signed SSL certificate so Nginx starts without crashing
+              openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                  -keyout /opt/openchat/nginx/ssl/server.key \
+                  -out /opt/openchat/nginx/ssl/server.crt \
+                  -subj "/C=US/ST=Cloud/L=Test/O=OpenChat/CN=localhost"
+              chmod 600 /opt/openchat/nginx/ssl/server.key
+
+              # Setup daily automated PostgreSQL backup to S3 at 02:00 UTC
+              cat << 'CRON' > /etc/cron.d/openchat-db-backup
+              0 2 * * * root /opt/openchat/scripts/backup_postgres_to_s3.sh ${aws_s3_bucket.db_backups.bucket} >> /var/log/openchat-backup.log 2>&1
+              CRON
+              chmod 644 /etc/cron.d/openchat-db-backup
               EOF
 
   tags = {

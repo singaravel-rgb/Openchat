@@ -12,8 +12,15 @@ terraform {
   }
 }
 
+variable "aws_profile" {
+  description = "AWS CLI profile name for deployment"
+  type        = string
+  default     = "openchat-test"
+}
+
 provider "aws" {
-  region = var.aws_region
+  region  = var.aws_region
+  profile = var.aws_profile
 
   default_tags {
     tags = {
