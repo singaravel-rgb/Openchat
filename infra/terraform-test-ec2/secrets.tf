@@ -18,14 +18,9 @@ resource "random_password" "jwt_secret" {
   special = false
 }
 
-variable "gemini_api_key" {
-  description = "Optional Gemini API Key for AI features (can be empty and updated later in SSM)"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
 # Stored as encrypted SecureString in SSM Parameter Store
+# NOTE: Real application secrets (like Gemini API key) are NEVER passed via Terraform.
+# The operator injects them post-provisioning using scripts/set_gemini_key.sh.
 resource "aws_ssm_parameter" "test_env" {
   name        = "/${var.project_name}/env"
   description = "Runtime environment file for OpenChat EC2 testing host"
@@ -38,7 +33,7 @@ POSTGRES_PASSWORD=${random_password.db_password.result}
 REDIS_PASSWORD=${random_password.redis_auth.result}
 SECRET_KEY=${random_password.jwt_secret.result}
 AI_PROVIDER=gemini
-GEMINI_API_KEY=${var.gemini_api_key}
+GEMINI_API_KEY=
 ALLOWED_ORIGINS=*
 EOT
 
