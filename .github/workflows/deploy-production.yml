@@ -88,6 +88,32 @@ jobs:
             ${{ env.FRONTEND_REPO }}:${{ steps.image-meta.outputs.deploy_tag }}
             ${{ env.FRONTEND_REPO }}:latest
 
+      - name: Retag Rollback Images as Latest in ECR
+        if: steps.image-meta.outputs.is_rollback == 'true'
+        run: |
+          ROLLBACK_TAG="${{ steps.image-meta.outputs.deploy_tag }}"
+          echo "Rolling back ECR images to tag: $ROLLBACK_TAG"
+          
+          # Retag backend image as latest
+          BACKEND_MANIFEST=$(aws ecr batch-get-image --repository-name openchat-production/backend --image-ids imageTag="$ROLLBACK_TAG" --query 'images[].imageManifest' --output text)
+          if [ -n "$BACKEND_MANIFEST" ] && [ "$BACKEND_MANIFEST" != "None" ]; then
+            aws ecr put-image --repository-name openchat-production/backend --image-tag latest --image-manifest "$BACKEND_MANIFEST"
+            echo "Successfully restored openchat-production/backend:latest to $ROLLBACK_TAG"
+          else
+            echo "ERROR: Backend image with tag '$ROLLBACK_TAG' not found in ECR!"
+            exit 1
+          fi
+
+          # Retag frontend image as latest
+          FRONTEND_MANIFEST=$(aws ecr batch-get-image --repository-name openchat-production/frontend --image-ids imageTag="$ROLLBACK_TAG" --query 'images[].imageManifest' --output text)
+          if [ -n "$FRONTEND_MANIFEST" ] && [ "$FRONTEND_MANIFEST" != "None" ]; then
+            aws ecr put-image --repository-name openchat-production/frontend --image-tag latest --image-manifest "$FRONTEND_MANIFEST"
+            echo "Successfully restored openchat-production/frontend:latest to $ROLLBACK_TAG"
+          else
+            echo "ERROR: Frontend image with tag '$ROLLBACK_TAG' not found in ECR!"
+            exit 1
+          fi
+
       - name: Deploy to ECS Production Services (Zero-Downtime Rolling Update)
         run: |
           CLUSTER_NAME="openchat-production-cluster"

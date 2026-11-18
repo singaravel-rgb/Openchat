@@ -34,7 +34,8 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids = [aws_security_group.rds.id]
 
   # Multi-AZ enabled for production resilience
-  multi_az = var.environment == "production" ? true : false
+  multi_az            = var.environment == "production" ? true : false
+  publicly_accessible = false
 
   backup_retention_period = 7
   backup_window           = "03:00-04:00"
