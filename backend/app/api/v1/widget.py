@@ -25,7 +25,7 @@ from app.core.security import hash_password
 import secrets
 from app.services.conversation_service import (
     process_customer_message, append_assignment_history, record_system_event,
-    get_last_public_message, compute_unread_count,
+    get_last_public_message, compute_unread_count, generate_chat_id,
 )
 from app.services.assignment_service import assign_conversation_to_agent
 from app.services.sla_service import apply_sla_to_conversation
@@ -206,7 +206,7 @@ def restore_session(
 def _conv_to_widget(c: Conversation, db: Session) -> WidgetConversation:
     last = get_last_public_message(db, c.id)
     return WidgetConversation(
-        id=c.id, subject=c.subject, status=c.status, updated_at=c.updated_at, created_at=c.created_at,
+        id=c.id, chat_id=c.chat_id, subject=c.subject, status=c.status, updated_at=c.updated_at, created_at=c.created_at,
         last_message=last.content if last else None,
         unread_count=compute_unread_count(db, c, "customer"),
     )
@@ -260,6 +260,7 @@ async def create_conversation(
     _, user = require_widget_session(db, request, x_widget_session)
 
     conversation = Conversation(
+        chat_id=generate_chat_id(db),
         customer_id=user.id,
         subject=data.subject or "Website chat",
         status=ConversationStatus.AI_HANDLING,

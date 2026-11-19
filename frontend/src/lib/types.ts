@@ -56,6 +56,7 @@ export interface Token {
 
 export interface Conversation {
   id: number;
+  chat_id?: string;
   customer_id: number;
   assigned_agent_id: number | null;
   subject: string | null;
@@ -118,6 +119,7 @@ export type MessageType = 'text' | 'internal_note' | 'system_event';
 export interface ConversationLinkItem {
   id: number;
   linked_conversation_id: number;
+  chat_id?: string | null;
   subject?: string | null;
   status: string;
   customer_id: number;

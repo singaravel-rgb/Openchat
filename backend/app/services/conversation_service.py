@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_, distinct
+from sqlalchemy import func, or_, and_, distinct, text, select
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
@@ -11,12 +11,31 @@ from app.models.user import User
 from app.models.agent_profile import AgentProfile
 from app.models.ai import AIConfig
 from app.models.audit_log import AuditLog
+from app.models.notification import Notification, NotificationType, NotificationPriority
 from app.schemas.conversation import ConversationCreate, ConversationUpdate
 from app.services.sla_service import apply_sla_to_conversation
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def generate_chat_id(db: Session) -> str:
+    """Generate an atomic, sequential, permanent Chat ID (e.g. OC-2026-000001)."""
+    year = datetime.now(timezone.utc).year
+    try:
+        seq_val = db.execute(text("SELECT nextval('conversation_chat_id_seq')")).scalar()
+        if seq_val is not None:
+            return f"OC-{year}-{int(seq_val):06d}"
+    except Exception:
+        db.rollback()
+    # Fallback when sequence is not present (e.g. SQLite unit tests)
+    try:
+        max_id = db.execute(text("SELECT COALESCE(MAX(id), 0) FROM conversations")).scalar() or 0
+        return f"OC-{year}-{(int(max_id) + 1):06d}"
+    except Exception:
+        import uuid
+        return f"OC-{year}-{uuid.uuid4().hex[:6].upper()}"
 
 
 def list_conversations_query(
@@ -140,22 +159,31 @@ def list_conversations_query(
             query = query.filter(Conversation.status == s)
 
     if q:
-        like = f"%{q}%"
-        # Use subquery to get distinct conversation IDs first (avoids JSON comparison issues with DISTINCT)
-        subq = (
-            db.query(Conversation.id)
+        like = f"%{q.strip()}%"
+        # Search merged secondary conversations so searching their Chat ID returns the primary conversation
+        merged_parent_stmt = (
+            select(Conversation.merged_into_id)
+            .filter(
+                Conversation.chat_id.ilike(like),
+                Conversation.merged_into_id.isnot(None),
+            )
+        )
+        # Use select statement to get distinct conversation IDs first (avoids JSON comparison issues with DISTINCT)
+        subq_stmt = (
+            select(Conversation.id)
             .join(User, User.id == Conversation.customer_id)
             .outerjoin(Message, Message.conversation_id == Conversation.id)
             .filter(or_(
+                Conversation.chat_id.ilike(like),
+                Conversation.id.in_(merged_parent_stmt),
                 Conversation.subject.ilike(like),
                 User.full_name.ilike(like),
                 User.email.ilike(like),
                 and_(Message.is_internal == False, Message.content.ilike(like)),  # noqa: E712
             ))
             .distinct()
-            .subquery()
         )
-        query = query.filter(Conversation.id.in_(subq))
+        query = query.filter(Conversation.id.in_(subq_stmt))
 
     total = query.with_entities(func.count(func.distinct(Conversation.id))).scalar() if q else query.count()
     items = query.order_by(Conversation.updated_at.desc(), Conversation.id.desc()).offset(offset).limit(limit).all()
@@ -348,6 +376,23 @@ def assign_conversation(db: Session, conversation: Conversation, actor: User, ag
     agent = db.query(User).filter(User.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent.is_active:
+        raise HTTPException(status_code=400, detail="Target agent is inactive")
+
+    # Check capacity of target agent
+    profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
+    if profile:
+        live_active = (
+            db.query(Conversation)
+            .filter(
+                Conversation.assigned_agent_id == agent.id,
+                Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),
+            )
+            .count()
+        )
+        if live_active >= profile.max_conversations and agent.id != conversation.assigned_agent_id:
+            raise HTTPException(status_code=409, detail=f"Agent {agent.full_name} is at maximum capacity ({profile.max_conversations})")
+
     old_agent_id = conversation.assigned_agent_id
     if old_agent_id and old_agent_id != agent.id:
         release_agent_capacity(db, old_agent_id)
@@ -356,9 +401,37 @@ def assign_conversation(db: Session, conversation: Conversation, actor: User, ag
     conversation.status = ConversationStatus.ASSIGNED
     conversation.updated_at = _utcnow()
 
-    profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
     if profile:
         profile.active_conversations += 1
+
+    # Record assignment history
+    history_entry = {
+        "assigned_at": _utcnow().isoformat(),
+        "assigned_by_id": actor.id,
+        "assigned_by_name": actor.full_name,
+        "from_agent_id": old_agent_id,
+        "to_agent_id": agent.id,
+        "to_agent_name": agent.full_name,
+        "note": note,
+    }
+    conversation.assignment_history = list(conversation.assignment_history or []) + [history_entry]
+
+    # Send notification to receiving agent if assigned by someone else
+    if agent.id != actor.id:
+        try:
+            notif = Notification(
+                user_id=agent.id,
+                type=NotificationType.CONVERSATION_ASSIGNED,
+                priority=NotificationPriority.NORMAL,
+                title="Conversation Assigned",
+                message=f"Conversation {conversation.chat_id or f'#{conversation.id}'} was assigned to you by {actor.full_name}" + (f": {note}" if note else ""),
+                reference_type="conversation",
+                reference_id=conversation.id,
+                is_read=False,
+            )
+            db.add(notif)
+        except Exception:
+            pass
 
     if note:
         record_system_event(db, conversation, f"Assigned to {agent.full_name}: {note}", actor_id=actor.id)
@@ -369,7 +442,9 @@ def assign_conversation(db: Session, conversation: Conversation, actor: User, ag
 
 
 def create_conversation(db: Session, data: ConversationCreate, customer: User) -> Conversation:
+    cid = generate_chat_id(db)
     conversation = Conversation(
+        chat_id=cid,
         customer_id=customer.id,
         subject=data.subject,
         priority=data.priority or "normal",
@@ -579,6 +654,7 @@ def build_conversation_list_item(db: Session, conversation: Conversation, viewer
 
     return {
         "id": conversation.id,
+        "chat_id": getattr(conversation, "chat_id", None),
         "customer_id": conversation.customer_id,
         "assigned_agent_id": conversation.assigned_agent_id,
         "subject": conversation.subject,
@@ -786,6 +862,7 @@ def get_linked_conversations_for_conversation(db: Session, conversation_id: int)
         result.append({
             "id": link.id,
             "linked_conversation_id": other_conv.id,
+            "chat_id": getattr(other_conv, "chat_id", None),
             "subject": other_conv.subject,
             "status": other_conv.status,
             "customer_id": other_conv.customer_id,
@@ -974,3 +1051,68 @@ def merge_conversations(
     db.commit()
     db.refresh(target)
     return target
+
+
+def delete_conversation(db: Session, conversation: Conversation, actor: User) -> dict:
+    """Delete a conversation and cascade all related data. Restricted to admin and super_admin."""
+    if actor.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and super administrators can delete conversations.",
+        )
+
+    conv_id = conversation.id
+    chat_id = conversation.chat_id or f"#{conv_id}"
+
+    # Release agent capacity if assigned
+    if conversation.assigned_agent_id:
+        release_agent_capacity(db, conversation.assigned_agent_id)
+
+    # Clear merged_into_id on conversations that pointed to this one
+    db.query(Conversation).filter(Conversation.merged_into_id == conv_id).update(
+        {"merged_into_id": None}, synchronize_session=False
+    )
+
+    # Delete conversation tasks
+    from app.models.conversation_task import ConversationTask
+    db.query(ConversationTask).filter(ConversationTask.conversation_id == conv_id).delete(synchronize_session=False)
+
+    # Delete attachments
+    from app.models.attachment import Attachment
+    db.query(Attachment).filter(Attachment.conversation_id == conv_id).delete(synchronize_session=False)
+
+    # Delete messages
+    db.query(Message).filter(Message.conversation_id == conv_id).delete(synchronize_session=False)
+
+    # Delete links
+    db.query(ConversationLink).filter(
+        or_(
+            ConversationLink.conversation_id_1 == conv_id,
+            ConversationLink.conversation_id_2 == conv_id,
+        )
+    ).delete(synchronize_session=False)
+
+    # Create audit log record before deleting conversation
+    import json
+    audit_entry = AuditLog(
+        user_id=actor.id,
+        action="conversation.delete",
+        resource_type="conversation",
+        resource_id=conv_id,
+        details=json.dumps({
+            "conversation_id": conv_id,
+            "chat_id": chat_id,
+            "customer_id": conversation.customer_id,
+            "subject": conversation.subject,
+            "deleted_by": actor.full_name,
+            "deleted_by_id": actor.id,
+            "deleted_at": _utcnow().isoformat(),
+        }),
+    )
+    db.add(audit_entry)
+
+    db.delete(conversation)
+    db.commit()
+
+    return {"message": f"Conversation {chat_id} successfully deleted", "deleted_id": conv_id, "chat_id": chat_id}
+

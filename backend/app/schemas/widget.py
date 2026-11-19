@@ -103,6 +103,7 @@ class WidgetMessage(BaseModel):
 
 class WidgetConversation(BaseModel):
     id: int
+    chat_id: Optional[str] = None
     subject: Optional[str]
     status: str
     updated_at: datetime

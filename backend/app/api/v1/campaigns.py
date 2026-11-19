@@ -18,6 +18,7 @@ from app.schemas.campaign import (
     CampaignMessageResponse,
     CampaignLaunch,
 )
+from app.services.conversation_service import generate_chat_id
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
@@ -169,6 +170,7 @@ def launch_campaign(
         )
         if not conversation:
             conversation = Conversation(
+                chat_id=generate_chat_id(db),
                 customer_id=customer_id,
                 subject=f"Campaign: {campaign.name}",
                 status="pending",

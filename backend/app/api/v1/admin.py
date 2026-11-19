@@ -40,6 +40,7 @@ from app.services.conversation_service import (
     mark_conversation_read,
     update_global_note,
     get_linked_conversations_for_conversation,
+    delete_conversation as svc_delete_conversation,
 )
 from app.services.sla_service import record_first_response
 
@@ -339,6 +340,7 @@ def get_conversation_admin(
 
     return ConversationDetail(
         id=conversation.id,
+        chat_id=conversation.chat_id,
         customer_id=conversation.customer_id,
         assigned_agent_id=conversation.assigned_agent_id,
         subject=conversation.subject,
@@ -371,6 +373,18 @@ def get_conversation_admin(
             for l in get_linked_conversations_for_conversation(db, conversation.id)
         ],
     )
+
+
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation_admin(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return svc_delete_conversation(db, conversation, current_user)
 
 
 @router.patch("/conversations/{conversation_id}/global-note")

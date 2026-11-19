@@ -42,6 +42,9 @@ export function ConversationList({ conversations, emptyMessage = 'No conversatio
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
+                          {conversation.chat_id || `#${conversation.id}`}
+                        </span>
                         <h3 className="font-semibold text-slate-900 dark:text-white truncate">
                           {conversation.customer_name}
                         </h3>

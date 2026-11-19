@@ -153,6 +153,9 @@ export const conversationApi = {
   reopen: (id: number) =>
     fetchApi<ConversationDetail>(`/conversations/${id}/reopen`, { method: 'POST' }),
 
+  delete: (id: number) =>
+    fetchApi<{ message: string; deleted_id: number; chat_id: string }>(`/conversations/${id}`, { method: 'DELETE' }),
+
   updateGlobalNote: (id: number, content: string) =>
     fetchApi<GlobalNoteResponse>(`/conversations/${id}/global-note`, {
       method: 'PATCH',
@@ -443,6 +446,9 @@ export const adminApi = {
 
   reopenConversation: (id: number) =>
     fetchApi<{ message: string }>(`/admin/conversations/${id}/reopen`, { method: 'POST' }),
+
+  deleteConversation: (id: number) =>
+    fetchApi<{ message: string; deleted_id: number; chat_id: string }>(`/admin/conversations/${id}`, { method: 'DELETE' }),
 
   editMessage: (conversationId: number, messageId: number, content: string) =>
     conversationApi.editMessage(conversationId, messageId, content),

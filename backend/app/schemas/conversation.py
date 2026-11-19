@@ -57,6 +57,7 @@ class ConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    chat_id: Optional[str] = None
     customer_id: int
     assigned_agent_id: Optional[int]
     subject: Optional[str]
@@ -81,6 +82,7 @@ class ConversationLinkCreate(BaseModel):
 class ConversationLinkItem(BaseModel):
     id: int
     linked_conversation_id: int
+    chat_id: Optional[str] = None
     subject: Optional[str] = None
     status: str
     customer_id: int
@@ -134,6 +136,7 @@ class ConversationListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    chat_id: Optional[str] = None
     customer_id: int
     customer_name: str
     customer_email: str

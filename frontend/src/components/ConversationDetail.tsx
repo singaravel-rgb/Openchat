@@ -152,7 +152,19 @@ export function ConversationDetailView({ conversation, onUpdate, mode }: Convers
             <div className="flex items-center gap-3">
               <Avatar name={String(conversation.customer_id)} size="lg" />
               <div>
-                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Conversation #{conversation.id}</h2>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-lg font-bold text-blue-600 dark:text-blue-400">
+                    {conversation.chat_id || `Conversation #${conversation.id}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(conversation.chat_id || String(conversation.id))}
+                    title="Copy Chat ID"
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700"
+                  >
+                    Copy ID
+                  </button>
+                </div>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <Badge variant={getStatusBadgeVariant(conversation.status)}>{conversation.status.replace('_', ' ')}</Badge>
                   <Badge variant={conversation.priority === 'high' || conversation.priority === 'urgent' ? 'warning' : 'default'}>{conversation.priority || 'normal'}</Badge>

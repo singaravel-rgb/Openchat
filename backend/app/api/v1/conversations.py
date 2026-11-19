@@ -35,6 +35,8 @@ from app.services.conversation_service import (
     reopen_conversation,
     update_global_note,
     get_linked_conversations_for_conversation,
+    generate_chat_id,
+    delete_conversation as svc_delete_conversation,
 )
 from app.services.sla_service import apply_sla_to_conversation
 
@@ -52,6 +54,7 @@ def create_conversation(
         raise HTTPException(status_code=403, detail="Only customers can create conversations")
 
     conversation = Conversation(
+        chat_id=generate_chat_id(db),
         customer_id=current_user.id,
         subject=data.subject,
         status=ConversationStatus.AI_HANDLING,
@@ -113,6 +116,7 @@ def get_conversation(
 
     return ConversationDetail(
         id=conversation.id,
+        chat_id=conversation.chat_id,
         customer_id=conversation.customer_id,
         assigned_agent_id=conversation.assigned_agent_id,
         subject=conversation.subject,
@@ -379,4 +383,22 @@ def retract_message(
     db.commit()
     db.refresh(message)
     return {"message": "Message retracted successfully", "id": message.id}
+
+
+@router.delete("/{conversation_id}")
+def delete_conversation_endpoint(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and super administrators can delete conversations.",
+        )
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return svc_delete_conversation(db, conversation, current_user)
+
 

@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Boolean, Text, func, JSON, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, Boolean, Text, func, JSON, UniqueConstraint, event, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import ConversationStatus
@@ -32,9 +32,17 @@ class Conversation(Base):
         Index("ix_conversations_sla_resolution_due", "sla_resolution_due_at"),
         Index("ix_conversations_priority", "priority"),
         Index("ix_conversations_assigned_status", "assigned_agent_id", "status"),
+        Index("ix_conversations_chat_id", "chat_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+
+    chat_id: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
 
     customer_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),
@@ -210,3 +218,20 @@ class ConversationLink(Base):
         "Conversation",
         foreign_keys=[conversation_id_2],
     )
+
+
+@event.listens_for(Conversation, "before_insert")
+def set_conversation_chat_id(mapper, connection, target):
+    if not target.chat_id:
+        year = datetime.now(timezone.utc).year
+        try:
+            seq_val = connection.execute(text("SELECT nextval('conversation_chat_id_seq')")).scalar()
+            target.chat_id = f"OC-{year}-{int(seq_val):06d}"
+        except Exception:
+            try:
+                res = connection.execute(text("SELECT COALESCE(MAX(id), 0) FROM conversations")).scalar() or 0
+                target.chat_id = f"OC-{year}-{(int(res) + 1):06d}"
+            except Exception:
+                import uuid
+                target.chat_id = f"OC-{year}-{uuid.uuid4().hex[:6].upper()}"
+

@@ -52,6 +52,9 @@ from app.services.conversation_service import (
     link_conversations,
     unlink_conversations,
     merge_conversations,
+    release_agent_capacity,
+    record_system_event,
+    _utcnow,
 )
 from app.services.ai_service import get_or_create_ai_config, get_runtime_ai_config, retrieve_knowledge_hits, generate_with_provider, format_knowledge_context
 
@@ -102,6 +105,7 @@ def _conversation_detail(
 
     return ConversationDetail(
         id=conversation.id,
+        chat_id=conversation.chat_id,
         customer_id=conversation.customer_id,
         assigned_agent_id=conversation.assigned_agent_id,
         subject=conversation.subject,
@@ -248,15 +252,40 @@ def assign_conversation(
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    # only admins can assign to others/unassign; agents can self-assign via take
-    if current_user.role == "agent" and data.agent_id not in (None, current_user.id):
-        raise HTTPException(status_code=403, detail="Agents cannot reassign to another agent")
-    if data.agent_id == current_user.id and current_user.role == "agent":
-        svc_take(db, conversation, current_user)
+
+    if current_user.role == "agent":
+        if data.agent_id is None:
+            # Unassign back to queue
+            if conversation.assigned_agent_id != current_user.id:
+                raise HTTPException(status_code=403, detail="You can only unassign conversations assigned to you")
+            if conversation.assigned_agent_id:
+                release_agent_capacity(db, conversation.assigned_agent_id)
+            conversation.assigned_agent_id = None
+            conversation.status = ConversationStatus.PENDING
+            conversation.updated_at = _utcnow()
+            record_system_event(db, conversation, f"Unassigned by {current_user.full_name}", actor_id=current_user.id)
+            db.commit()
+            return {"message": "Conversation unassigned"}
+        elif data.agent_id == current_user.id:
+            svc_take(db, conversation, current_user)
+        else:
+            # Agent-to-Agent Reassignment:
+            # Agents can transfer assigned conversations (or unassigned/pending) to another active eligible agent
+            if conversation.assigned_agent_id is not None and conversation.assigned_agent_id != current_user.id:
+                raise HTTPException(status_code=403, detail="You can only reassign conversations assigned to you")
+            svc_assign(db, conversation, current_user, data.agent_id, note=data.note)
     else:
-        if current_user.role not in ("admin", "super_admin"):
-            raise HTTPException(status_code=403, detail="Admin only")
-        svc_assign(db, conversation, current_user, data.agent_id, note=data.note)
+        # Admin / Super Admin
+        if data.agent_id is None:
+            if conversation.assigned_agent_id:
+                release_agent_capacity(db, conversation.assigned_agent_id)
+            conversation.assigned_agent_id = None
+            conversation.status = ConversationStatus.PENDING
+            conversation.updated_at = _utcnow()
+            record_system_event(db, conversation, f"Unassigned by {current_user.full_name}", actor_id=current_user.id)
+        else:
+            svc_assign(db, conversation, current_user, data.agent_id, note=data.note)
+
     db.commit()
     return {"message": "Conversation assignment updated"}
 
