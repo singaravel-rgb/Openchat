@@ -298,7 +298,20 @@ def detect_complexity(text: str) -> bool:
 
 def detect_greeting(text: str) -> bool:
     t = (text or "").strip().lower()
-    return any(re.search(p, t) for p in GREETING_PATTERNS)
+    words = t.split()
+    if len(words) <= 15:
+        greeting_regexes = [
+            r"\b(hi|hello|hey|howdy|greetings)\b",
+            r"\bgood\s+(morning|afternoon|evening|day)\b",
+            r"\bhi\s+there\b",
+            r"\bhey\s+there\b",
+            r"\bhow\s+are\s+you\b",
+            r"\bwho\s+are\s+you\b",
+            r"\bwhat\s+can\s+you\s+do\b",
+        ]
+        if any(re.search(p, t) for p in greeting_regexes):
+            return True
+    return False
 
 
 def build_handoff_summary(conversation: Conversation, messages: list[Message], escalation_reason: str | None, sources: list[dict[str, Any]], max_messages: int = 8) -> str:
@@ -873,19 +886,27 @@ async def process_ai_turn(
         should_escalate = False
     elif forced_abstain:
         decision = abstain_decision or "abstain"
-        if runtime.escalation_rules.get("escalate_on_uncertain", True) and confidence < runtime.confidence_threshold:
+        if customer_turns >= 2 and runtime.escalation_rules.get("escalate_on_uncertain", True) and confidence < runtime.confidence_threshold:
             should_escalate = True
             reason = "Insufficient verified knowledge or confidence to answer"
             decision = "escalate"
+        else:
+            should_escalate = False
+            decision = "clarify"
     elif knowledge_hits and confidence >= runtime.confidence_threshold:
         decision = "answered"
         should_escalate = False
     elif not knowledge_hits:
-        decision = "abstain"
-        if runtime.escalation_rules.get("escalate_on_uncertain", True):
+        if customer_turns < 2:
+            decision = "clarify"
+            should_escalate = False
+        elif runtime.escalation_rules.get("escalate_on_uncertain", True):
             should_escalate = True
             reason = "No relevant verified knowledge found"
             decision = "escalate"
+        else:
+            decision = "clarify"
+            should_escalate = False
     else:
         decision = "clarify"
         if customer_turns >= max_turns:
