@@ -64,6 +64,7 @@ class WidgetPublicConfig(BaseModel):
     hide_launcher_on_help_page: bool
     show_agent_avatar: bool
     require_email: bool
+    bot_flow: Optional[dict] = None
 
 
 class WidgetSessionCreate(BaseModel):

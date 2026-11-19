@@ -167,6 +167,132 @@ def archive_bot_flow(
     return flow
 
 
+@router.post("/{flow_id}/duplicate", response_model=BotFlowResponse, status_code=status.HTTP_201_CREATED)
+def duplicate_bot_flow(
+    flow_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_agent),
+):
+    """Duplicate a bot flow along with all its steps and issues."""
+    original = db.query(BotFlow).filter(BotFlow.id == flow_id).first()
+    if not original:
+        raise HTTPException(status_code=404, detail="Bot flow not found")
+
+    new_flow = BotFlow(
+        name=f"{original.name} (Copy)",
+        description=original.description,
+        initial_greeting=original.initial_greeting,
+        status="draft",
+        version=1,
+        is_default=False,
+        created_by_id=current_user.id,
+    )
+    db.add(new_flow)
+    db.commit()
+    db.refresh(new_flow)
+
+    issues = db.query(BotFlowIssue).filter(BotFlowIssue.flow_id == flow_id).all()
+    for issue in issues:
+        new_issue = BotFlowIssue(
+            flow_id=new_flow.id,
+            title=issue.title,
+            description=issue.description,
+            start_step_key=issue.start_step_key,
+            sort_order=issue.sort_order,
+            is_active=issue.is_active,
+        )
+        db.add(new_issue)
+
+    steps = db.query(BotFlowStep).filter(BotFlowStep.flow_id == flow_id).all()
+    for step in steps:
+        new_step = BotFlowStep(
+            flow_id=new_flow.id,
+            step_key=step.step_key,
+            step_type=step.step_type,
+            message_text=step.message_text,
+            options=step.options,
+            next_step_key=step.next_step_key,
+            is_terminal=step.is_terminal,
+            sort_order=step.sort_order,
+        )
+        db.add(new_step)
+
+    db.commit()
+    return new_flow
+
+
+@router.get("/{flow_id}/tree")
+def get_bot_flow_tree(
+    flow_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_agent),
+):
+    """Get the complete hierarchical tree representation of a bot flow."""
+    import json
+    flow = db.query(BotFlow).filter(BotFlow.id == flow_id).first()
+    if not flow:
+        raise HTTPException(status_code=404, detail="Bot flow not found")
+
+    issues = db.query(BotFlowIssue).filter(BotFlowIssue.flow_id == flow_id).order_by(BotFlowIssue.sort_order.asc()).all()
+    steps = db.query(BotFlowStep).filter(BotFlowStep.flow_id == flow_id).order_by(BotFlowStep.sort_order.asc()).all()
+    steps_by_key = {s.step_key: s for s in steps}
+
+    def build_node(step_key: str, visited: set) -> dict:
+        if not step_key or step_key not in steps_by_key or step_key in visited:
+            return {"step_key": step_key, "found": step_key in steps_by_key, "circular": step_key in visited}
+        new_visited = visited | {step_key}
+        step = steps_by_key[step_key]
+        parsed_opts = []
+        if step.options:
+            try:
+                parsed_opts = json.loads(step.options)
+            except Exception:
+                parsed_opts = []
+
+        children = []
+        for opt in parsed_opts:
+            next_k = opt.get("next_step_key")
+            child_node = build_node(next_k, new_visited) if next_k else None
+            children.append({
+                "label": opt.get("label"),
+                "value": opt.get("value"),
+                "next_step_key": next_k,
+                "node": child_node,
+            })
+
+        return {
+            "id": step.id,
+            "step_key": step.step_key,
+            "step_type": step.step_type,
+            "message_text": step.message_text,
+            "is_terminal": step.is_terminal,
+            "options": children,
+        }
+
+    tree_roots = []
+    for issue in issues:
+        tree_roots.append({
+            "id": issue.id,
+            "title": issue.title,
+            "description": issue.description,
+            "start_step_key": issue.start_step_key,
+            "sort_order": issue.sort_order,
+            "is_active": issue.is_active,
+            "root_node": build_node(issue.start_step_key, set()) if issue.start_step_key else None,
+        })
+
+    return {
+        "flow_id": flow.id,
+        "name": flow.name,
+        "initial_greeting": flow.initial_greeting,
+        "status": flow.status,
+        "version": flow.version,
+        "is_default": flow.is_default,
+        "issues": tree_roots,
+        "total_steps": len(steps),
+    }
+
+
 # ===== Bot Flow Step Endpoints =====
 
 @router.post("/{flow_id}/steps", response_model=BotFlowStepResponse, status_code=status.HTTP_201_CREATED)

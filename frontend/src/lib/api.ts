@@ -952,6 +952,25 @@ export const botFlowApi = {
   archive: (id: number) =>
     fetchApi<BotFlow>(`/bot-flows/${id}/archive`, { method: 'POST' }),
 
+  duplicate: (id: number) =>
+    fetchApi<BotFlow>(`/bot-flows/${id}/duplicate`, { method: 'POST' }),
+
+  getTree: (id: number) =>
+    fetchApi<{
+      id: number;
+      name: string;
+      initial_greeting: string | null;
+      status: string;
+      version: number;
+      tree: Array<{
+        issue_id: number;
+        title: string;
+        description: string | null;
+        start_step_key: string | null;
+        root_step: any;
+      }>;
+    }>(`/bot-flows/${id}/tree`),
+
   // Steps
   listSteps: (flowId: number) => fetchApi<BotFlowStep[]>(`/bot-flows/${flowId}/steps`),
 

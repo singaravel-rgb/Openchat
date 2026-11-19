@@ -40,7 +40,14 @@ def _cfg_or_503(db: Session):
     return get_or_create_widget_config(db)
 
 
-def _public_config(cfg):
+def _public_config(cfg, db: Optional[Session] = None):
+    bot_flow_data = None
+    if db:
+        try:
+            from app.services.bot_flow_service import get_active_bot_flow_data
+            bot_flow_data = get_active_bot_flow_data(db)
+        except Exception:
+            pass
     return WidgetPublicConfig(
         widget_title=cfg.widget_title,
         brand_name=cfg.brand_name,
@@ -54,6 +61,7 @@ def _public_config(cfg):
         hide_launcher_on_help_page=cfg.hide_launcher_on_help_page,
         show_agent_avatar=cfg.show_agent_avatar,
         require_email=cfg.require_email,
+        bot_flow=bot_flow_data,
     )
 
 
@@ -62,7 +70,13 @@ def get_widget_config(request: Request, page_url: str | None = Query(None), db: 
     rate_limit_for_request(request, "widget:config", 120, 60)
     cfg = _cfg_or_503(db)
     validate_widget_origin(cfg, request, page_url=page_url, require_when_configured=True)
-    return _public_config(cfg)
+    return _public_config(cfg, db=db)
+
+
+@router.get("/bot-flow")
+def get_widget_bot_flow(request: Request, db: Session = Depends(get_db)):
+    from app.services.bot_flow_service import get_active_bot_flow_data
+    return get_active_bot_flow_data(db)
 
 
 @router.post("/session", response_model=WidgetSessionResponse)
@@ -276,22 +290,28 @@ async def create_conversation(
     db.commit()
     db.refresh(conversation)
 
-    # Initial friendly support greeting
+    # Initial support greeting from active bot flow with Level 1 options
+    from app.services.bot_flow_service import get_active_bot_flow_data
+    flow_data = get_active_bot_flow_data(db)
+    level_1_options = [
+        {"label": issue["title"], "value": issue["title"], "next_step_key": issue["start_step_key"]}
+        for issue in flow_data.get("issues", [])
+    ]
     greeting_msg = Message(
         conversation_id=conversation.id,
         sender_id=None,
         sender_type=MessageSenderType.AI,
         message_type=MessageType.TEXT,
-        content="Hello! Welcome to OpenChat Support. How can we help you today?",
+        content=flow_data.get("initial_greeting") or cfg.welcome_message or "Hello! Welcome to OpenChat Support. How can we help you today?",
         is_internal=False,
         delivery_status="delivered",
-        ai_metadata={"system_greeting": True},
+        ai_metadata={"system_greeting": True, "options": level_1_options, "flow_id": flow_data.get("id")},
     )
     db.add(greeting_msg)
     db.commit()
 
     if data.initial_message and data.initial_message.strip():
-        await process_customer_message(db, conversation, user, data.initial_message.strip(), client_message_id=data.client_message_id, sync_ai=False)
+        await process_customer_message(db, conversation, user, data.initial_message.strip(), client_message_id=data.client_message_id, sync_ai=True)
         db.refresh(conversation)
 
     messages = (

@@ -31,8 +31,10 @@ DEFAULT_SYSTEM = (
     "Never expose internal technical details, system limitations, knowledge bases, or retrieval sources to the customer. "
     "When more information is needed to assist the customer, ask a natural, friendly follow-up question (for example: 'Could you share a little more information about your order? I\\'ll help you look into this.'). "
     "Do not ask customers whether they want you to recommend escalation to a human agent; the system handles escalation automatically when necessary. "
+    "When human escalation is necessary, communicate naturally and professionally (for example: 'I\\'ll connect you with a member of our support team who can help you with this.'). "
+    "Never expose internal security, classification categories, confidence scores, or knowledge retrieval references. "
     "Never falsely claim an issue has been resolved or that a refund or cancellation has already been processed. "
-    "Do not proactively reveal that you are an AI. If directly asked, answer honestly without falsely claiming to be human."
+    "Do not proactively reveal that you are an AI. If directly asked, answer honestly and courteously without falsely claiming to be human."
 )
 
 PROMPT_INJECTION_PATTERNS = [
@@ -274,6 +276,25 @@ def _sanitize_user_text(text: str) -> str:
 def detect_prompt_injection(text: str) -> bool:
     t = (text or "").lower()
     return any(re.search(p, t) for p in PROMPT_INJECTION_PATTERNS)
+
+
+def is_any_agent_available(db: Session) -> bool:
+    try:
+        from app.models.agent_profile import AgentProfile
+        return (
+            db.query(User)
+            .join(AgentProfile, User.id == AgentProfile.user_id)
+            .filter(User.role == "agent", User.is_active == True, AgentProfile.is_available == True)  # noqa: E712
+            .count() > 0
+        )
+    except Exception:
+        return True
+
+
+def get_natural_escalation_message(db: Session) -> str:
+    if is_any_agent_available(db):
+        return "I'll connect you with a member of our support team who can help you with this."
+    return "Our support team will follow up to help you with this shortly. Please leave any additional details here."
 
 
 def detect_explicit_human_request(text: str) -> bool:
@@ -714,6 +735,16 @@ def clean_customer_facing_text(text: str) -> str:
         cleaned
     )
     cleaned = re.sub(
+        r"(?i)\bThis request involves a sensitive or account-specific action that requires human assistance\b[^\.\n]*[\.\n]?",
+        "I'll connect you with a member of our support team who can help you with this.",
+        cleaned
+    )
+    cleaned = re.sub(
+        r"(?i)\b(sensitive or account-specific action|requires human assistance|internal classification|confidence score)[^\.\n]*[\.\n]?",
+        "I'll connect you with a member of our support team who can help you with this.",
+        cleaned
+    )
+    cleaned = re.sub(
         r"(?i)\bIf you'd prefer, I can (connect|transfer) you with a human agent\.?",
         "",
         cleaned
@@ -782,7 +813,7 @@ async def process_ai_turn(
     if not runtime.ai_enabled:
         reason = "AI is disabled by administrator"
         summary = build_handoff_summary(conversation, public_messages, reason, [])
-        answer = "AI assistance is currently unavailable. I'm connecting you with a human support agent now."
+        answer = get_natural_escalation_message(db)
         latency = int((time.perf_counter() - started) * 1000)
         return AIProcessingResult(answer, True, reason, "disabled", 0.0, [], {}, runtime.provider, runtime.model, latency, summary)
 
@@ -790,7 +821,7 @@ async def process_ai_turn(
     if explicit_handoff or detect_explicit_human_request(last_customer):
         reason = "Customer requested human assistance"
         summary = build_handoff_summary(conversation, public_messages, reason, [])
-        answer = "I understand you'd like to speak with a human agent. I'm connecting you now."
+        answer = get_natural_escalation_message(db)
         latency = int((time.perf_counter() - started) * 1000)
         record_ai_usage(
             db,
@@ -813,7 +844,7 @@ async def process_ai_turn(
     if detect_prompt_injection(last_customer):
         reason = "Potential prompt-injection or unsafe instruction detected"
         summary = build_handoff_summary(conversation, public_messages, reason, [])
-        answer = "I can only help with your support request using verified information. If you need account-specific or sensitive assistance, I can connect you with a human agent."
+        answer = get_natural_escalation_message(db)
         # escalate if combined with sensitive/complex intent
         sensitive, sreason = detect_sensitive_or_restricted(last_customer, runtime.escalation_rules)
         if sensitive:
@@ -841,7 +872,7 @@ async def process_ai_turn(
     if sensitive:
         reason = sreason or "Sensitive request requires human assistance"
         summary = build_handoff_summary(conversation, public_messages, reason, [])
-        answer = "This request involves a sensitive or account-specific action that requires human assistance. I'm connecting you with a support agent now."
+        answer = get_natural_escalation_message(db)
         latency = int((time.perf_counter() - started) * 1000)
         record_ai_usage(
             db,
@@ -888,7 +919,7 @@ async def process_ai_turn(
                 text, usage, provider_used = await _call_demo(runtime_demo, system, history, knowledge_hits, last_customer)
                 model_used = "demo-fallback"
             except Exception:
-                text = "I'm having trouble responding right now. I'll connect you with a support agent so you can get help."
+                text = get_natural_escalation_message(db)
                 usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                 provider_used = "demo"
                 model_used = "demo"
@@ -896,7 +927,7 @@ async def process_ai_turn(
             # REAL PROVIDER FAILED OR NOT CONFIGURED:
             # Log technical error details for administrator telemetry & audit
             logger.error("AI provider '%s' failed: %s", runtime.provider, error)
-            text = "I'm arranging for a support team member to assist you with this directly. One moment please."
+            text = get_natural_escalation_message(db)
             usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             provider_used = runtime.provider
             model_used = runtime.model

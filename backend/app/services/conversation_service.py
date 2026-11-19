@@ -155,8 +155,22 @@ def list_conversations_query(
             query = query.filter(Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED]))
         elif s == "resolved":
             query = query.filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
+        elif s in ("all", "any"):
+            pass  # Explicit all includes resolved
         else:
             query = query.filter(Conversation.status == s)
+    elif not q and queue not in ("resolved",):
+        # Default view: show unresolved/active conversations only (hide resolved & closed by default)
+        query = query.filter(
+            Conversation.status.in_([
+                ConversationStatus.OPEN,
+                ConversationStatus.ASSIGNED,
+                ConversationStatus.PENDING,
+                ConversationStatus.AI_HANDLING,
+                ConversationStatus.WAITING_ON_CUSTOMER,
+                ConversationStatus.ON_HOLD,
+            ])
+        )
 
     if q:
         like = f"%{q.strip()}%"
@@ -835,14 +849,17 @@ async def process_customer_message(
     db.commit()
     db.refresh(customer_msg)
 
-    # If conversation is in AI_HANDLING status, trigger AI response
+    # If conversation is in AI_HANDLING status, evaluate bot flow step or Gemini AI response
     if conversation.status == ConversationStatus.AI_HANDLING:
-        if sync_ai:
-            await _execute_ai_turn_for_conversation(db, conversation.id, customer.id)
-            db.refresh(conversation)
-        else:
-            import asyncio
-            asyncio.create_task(_run_ai_turn_background(conversation.id, customer.id))
+        from app.services.bot_flow_service import match_and_execute_bot_flow_step
+        bot_flow_msg = match_and_execute_bot_flow_step(db, conversation, customer, content)
+        if not bot_flow_msg:
+            if sync_ai:
+                await _execute_ai_turn_for_conversation(db, conversation.id, customer.id)
+                db.refresh(conversation)
+            else:
+                import asyncio
+                asyncio.create_task(_run_ai_turn_background(conversation.id, customer.id))
 
     return customer_msg
 

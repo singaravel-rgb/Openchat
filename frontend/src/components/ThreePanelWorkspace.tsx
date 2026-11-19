@@ -120,7 +120,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const searchParams = useSearchParams();
 
   // Layout state
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightDetailsSection, setRightDetailsSection] = useState<string | null>(null);
   const [queueFilter, setQueueFilter] = useState<'all' | 'unassigned' | 'pending' | 'waiting' | 'on_hold' | 'ai'>('all');
   const [showEmojiMenu, setShowEmojiMenu] = useState(false);
@@ -202,6 +202,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [isEditingGlobalNote, setIsEditingGlobalNote] = useState(false);
   const [savingGlobalNote, setSavingGlobalNote] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [showSecondaryMenu, setShowSecondaryMenu] = useState(false);
   const [primaryFilter, setPrimaryFilter] = useState<'all' | 'ai' | 'me' | 'agent'>('all');
   const [selectedOtherAgentId, setSelectedOtherAgentId] = useState<string>('all');
 
@@ -1042,7 +1043,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         if (selectedOtherAgentId !== 'all' && c.assigned_agent_id !== Number(selectedOtherAgentId)) return false;
       }
 
-      if (adminFilters.status && c.status !== adminFilters.status) return false;
+      if (adminFilters.status) {
+        if (adminFilters.status === 'resolved') {
+          if (c.status !== 'resolved' && c.status !== 'closed') return false;
+        } else if (adminFilters.status === 'open') {
+          if (c.status !== 'open' && c.status !== 'assigned') return false;
+        } else if (adminFilters.status !== 'all') {
+          if (c.status !== adminFilters.status) return false;
+        }
+      } else {
+        // Default view: exclude resolved and closed unless searching with a search query
+        if (!searchQuery && (c.status === 'resolved' || c.status === 'closed')) return false;
+      }
       if (adminFilters.agent_id && String(c.assigned_agent_id) !== String(adminFilters.agent_id)) return false;
 
       const agentObj = c.assigned_agent_id ? agents.find(a => a.id === c.assigned_agent_id) : null;
@@ -1179,16 +1191,17 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   id="filter-status-dropdown"
                   value={adminFilters.status}
                   onChange={(e) => setAdminFilters(prev => ({ ...prev, status: e.target.value }))}
-                  className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
                   aria-label="Filter by status"
                 >
-                  <option value="">All Statuses</option>
+                  <option value="">All Statuses (Active)</option>
                   <option value="open">Open</option>
                   <option value="pending">Pending</option>
                   <option value="waiting_on_customer">Waiting on Customer</option>
                   <option value="on_hold">On Hold</option>
                   <option value="resolved">Resolved</option>
                   <option value="ai_handling">AI Handling</option>
+                  <option value="all">All (Including Resolved)</option>
                 </select>
               </div>
 
@@ -1650,47 +1663,94 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     </Button>
                   )}
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 inline-flex items-center"
-                    onClick={() => { setLinkTargetId(''); setShowLinkModal(true); }}
-                    title="Link related conversation"
-                  >
-                    <svg className="w-3.5 h-3.5 mr-1.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    Link
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 disabled:opacity-50 inline-flex items-center"
-                    onClick={() => { setMergeTargetId(''); setConfirmCrossCustomer(false); setConfirmMergeExplicit(false); setShowMergeModal(true); }}
-                    title="Merge duplicate conversation"
-                    disabled={selectedConversation.status === 'merged' || Boolean(selectedConversation.merged_into_id)}
-                  >
-                    <svg className="w-3.5 h-3.5 mr-1.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                    </svg>
-                    Merge
-                  </Button>
-
-                  {(userRole === 'admin' || (user as { role?: string })?.role === 'super_admin') && (
+                  {/* Secondary Actions: Three-Dot Overflow Menu */}
+                  <div className="relative">
                     <Button
+                      id="header-more-actions-btn"
                       variant="outline"
                       size="sm"
-                      className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 inline-flex items-center"
-                      onClick={() => setShowDeleteModal(true)}
-                      title="Delete conversation (Cascading permanent deletion)"
+                      onClick={() => setShowSecondaryMenu((v) => !v)}
+                      className="h-8 w-8 p-0 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center rounded-lg shadow-2xs"
+                      aria-label="More conversation actions"
+                      title="More actions (Link, Merge, Tags, Delete)"
                     >
-                      <svg className="w-3.5 h-3.5 mr-1.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                       </svg>
-                      Delete
                     </Button>
-                  )}
+                    {showSecondaryMenu && (
+                      <>
+                        <div className="fixed inset-0 z-20" onClick={() => setShowSecondaryMenu(false)} />
+                        <div className="absolute right-0 mt-1 w-52 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1 z-30 animate-in fade-in-50 zoom-in-95">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSecondaryMenu(false);
+                              setLinkTargetId('');
+                              setShowLinkModal(true);
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left font-medium"
+                          >
+                            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                            </svg>
+                            <span>Link conversation</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={selectedConversation.status === 'merged' || Boolean(selectedConversation.merged_into_id)}
+                            onClick={() => {
+                              setShowSecondaryMenu(false);
+                              setMergeTargetId('');
+                              setConfirmCrossCustomer(false);
+                              setConfirmMergeExplicit(false);
+                              setShowMergeModal(true);
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors text-left font-medium"
+                          >
+                            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                            </svg>
+                            <span>Merge conversation</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSecondaryMenu(false);
+                              setShowTagModal(true);
+                            }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left font-medium"
+                          >
+                            <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                            </svg>
+                            <span>Manage tags</span>
+                          </button>
+
+                          {(userRole === 'admin' || (user as { role?: string })?.role === 'super_admin') && (
+                            <>
+                              <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowSecondaryMenu(false);
+                                  setShowDeleteModal(true);
+                                }}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors text-left font-medium"
+                              >
+                                <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                <span>Delete conversation</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2233,22 +2293,25 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         aria-label="Conversation details"
       >
         {!rightPanelOpen ? (
-          <div className="flex h-full flex-col items-center gap-2 py-3">
-            <Button
-              variant="ghost"
-              size="icon"
+          <div className="flex h-full flex-col items-center py-3">
+            <button
+              type="button"
               onClick={() => {
                 setRightPanelOpen(true);
                 setRightDetailsSection(null);
               }}
               aria-label="Expand customer details"
-              className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              className="w-full flex flex-col items-center gap-2 px-1 py-2 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors rounded-lg group"
+              title="Click Customer Details header to expand"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={rightPanelOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
+              <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
-            </Button>
-            <div className="mt-2 flex flex-col items-center gap-3 text-slate-500 dark:text-slate-400">
+              <span className="text-[10px] font-semibold tracking-wider uppercase [writing-mode:vertical-rl] rotate-180 text-slate-500 group-hover:text-blue-600">
+                Customer Details
+              </span>
+            </button>
+            <div className="mt-3 flex flex-col items-center gap-2 text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-800 pt-3">
               <button
                 type="button"
                 title="Contact information"
@@ -2256,7 +2319,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   setRightPanelOpen(true);
                   setRightDetailsSection('contact');
                 }}
-                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-blue-600"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -2269,7 +2332,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   setRightPanelOpen(true);
                   setRightDetailsSection('properties');
                 }}
-                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-blue-600"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -2282,7 +2345,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   setRightPanelOpen(true);
                   setRightDetailsSection('time');
                 }}
-                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-blue-600"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -2295,7 +2358,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   setRightPanelOpen(true);
                   setRightDetailsSection('timeline');
                 }}
-                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-blue-600"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -2305,18 +2368,27 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
           </div>
         ) : (
           <div className="flex flex-col h-full">
-            {/* Panel Header */}
-            <div className="p-3 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Customer Details</h2>
+            {/* Panel Header - Accordion toggle */}
+            <div
+              className="p-3 border-b border-slate-200 dark:border-slate-800 flex-shrink-0 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors select-none"
+              onClick={() => setRightPanelOpen(false)}
+              title="Click Customer Details header to collapse"
+            >
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Customer Details</h2>
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setRightPanelOpen(false)}
+                onClick={(e) => { e.stopPropagation(); setRightPanelOpen(false); }}
                 aria-label="Collapse details panel"
                 className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={rightPanelOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </Button>
             </div>

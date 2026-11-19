@@ -460,6 +460,7 @@ export function createNavigation(user: User): NavGroup[] {
       icon: NavIcons.settings,
       items: [
         { label: 'General', href: '/admin/settings', icon: NavIcons.settings },
+        { label: 'Bot Flows', href: '/admin/bot-flows', icon: NavIcons.rules },
         { label: 'AI Flow & Rules', href: '/admin/settings/ai-flow', icon: NavIcons.rules },
         { label: 'AI Configuration', href: '/admin/settings/ai', icon: NavIcons.settings },
         { label: 'Integrations & Channels', href: '/admin/integrations', icon: NavIcons.customFields },

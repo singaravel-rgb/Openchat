@@ -518,17 +518,25 @@
         if (state.info) panel += '<div class="ocw-error" style="background:#ecfeff;color:#155e75;border-color:#a5f3fc">' + esc(state.info) + '</div>';
         if (state.offline) panel += '<div class="ocw-error">You appear to be offline. Messages will send when connection is restored.</div>';
         if (!state.detail) {
-          panel += '<div style="margin-bottom:12px;color:#334155;font-size:13px">' + esc(cfg.welcome_message || 'Hi! How can we help?') + '</div>';
+          panel += '<div style="margin-bottom:12px;color:#334155;font-size:13px">' + esc(cfg.welcome_message || (cfg.bot_flow && cfg.bot_flow.initial_greeting) || 'Hello! Welcome to OpenChat Support. How can we help you today?') + '</div>';
           panel += '<button class="ocw-btn ocw-btn-primary" id="ocw-start" style="background:' + esc(primary) + ';width:100%">' + (state.loading ? 'Connecting...' : 'Start new conversation') + '</button>';
           panel += '<div style="margin:14px 0 6px;font-size:12px;color:#475569;font-weight:600">Quick Assistance & Topics</div>';
-          panel += '<div class="ocw-topics" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">' +
-            '<button type="button" class="ocw-topic-btn" data-topic="📦 Order or Booking" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>📦 Order or Booking</span><span style="color:#94a3b8">→</span></button>' +
-            '<button type="button" class="ocw-topic-btn" data-topic="💳 Payment and Billing" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>💳 Payment and Billing</span><span style="color:#94a3b8">→</span></button>' +
-            '<button type="button" class="ocw-topic-btn" data-topic="🔄 Refund or Cancellation" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>🔄 Refund or Cancellation</span><span style="color:#94a3b8">→</span></button>' +
-            '<button type="button" class="ocw-topic-btn" data-topic="ℹ️ Product Information" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>ℹ️ Product Information</span><span style="color:#94a3b8">→</span></button>' +
-            '<button type="button" class="ocw-topic-btn" data-topic="🛠️ Technical Support" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>🛠️ Technical Support</span><span style="color:#94a3b8">→</span></button>' +
-            '<button type="button" class="ocw-topic-btn" data-topic="❓ Other Questions" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>❓ Other Questions</span><span style="color:#94a3b8">→</span></button>' +
-            '</div>';
+          panel += '<div class="ocw-topics" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">';
+          var topics = (cfg.bot_flow && cfg.bot_flow.issues && cfg.bot_flow.issues.length)
+            ? cfg.bot_flow.issues
+            : [
+                { title: "📦 Order or Booking" },
+                { title: "💳 Payment Issues" },
+                { title: "🔄 Refund or Cancellation" },
+                { title: "ℹ️ Product Information" },
+                { title: "🛠️ Technical Support" },
+                { title: "❓ Other Questions" }
+              ];
+          topics.forEach(function(top){
+            var title = esc(top.title || top);
+            panel += '<button type="button" class="ocw-topic-btn" data-topic="' + title + '" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>' + title + '</span><span style="color:#94a3b8">→</span></button>';
+          });
+          panel += '</div>';
           panel += '<div style="margin:14px 0 8px;font-size:12px;color:#64748b;font-weight:600">Your conversations</div>';
           if (state.conversations && state.conversations.length) {
             panel += '<div class="ocw-list">';
@@ -572,16 +580,22 @@
 
               var senderLabel = (m.sender_type === 'customer') ? 'You' : 'OpenChat Support';
               panel += '<div class="' + cls + '"><div class="ocw-bubble" style="' + bubbleStyle + '">' + content + '</div><div class="ocw-meta">' + senderLabel + ' • ' + fmtTime(m.created_at) + statusBadge + '</div></div>';
+
+              // Contextual multi-level bot flow options
+              if (m.sender_type !== 'customer' && m.ai_metadata && m.ai_metadata.options && m.ai_metadata.options.length) {
+                panel += '<div class="ocw-options-group" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px;padding-left:4px">';
+                m.ai_metadata.options.forEach(function(opt){
+                  var optLabel = esc(opt.label || opt.value || opt);
+                  var optVal = esc(opt.value || opt.label || opt);
+                  panel += '<button type="button" class="ocw-qr-btn" data-qr="' + optVal + '" style="font-size:12px;padding:6px 12px;border-radius:14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;cursor:pointer;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all 0.15s ease;text-align:left">' + optLabel + '</button>';
+                });
+                panel += '</div>';
+              }
             });
           } else {
             panel += '<div class="ocw-empty">Send a message to begin chatting.</div>';
           }
           panel += '</div>';
-          panel += '<div class="ocw-qr-bar" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px 6px;background:#f8fafc;border-top:1px solid #f1f5f9">' +
-            '<button type="button" class="ocw-qr-btn" data-qr="Track my order status" style="font-size:11px;padding:3px 8px;border-radius:12px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;cursor:pointer">Track order</button>' +
-            '<button type="button" class="ocw-qr-btn" data-qr="How do I download a tax invoice?" style="font-size:11px;padding:3px 8px;border-radius:12px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;cursor:pointer">Download invoice</button>' +
-            '<button type="button" class="ocw-qr-btn" data-qr="Check my refund status" style="font-size:11px;padding:3px 8px;border-radius:12px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;cursor:pointer">Refund status</button>' +
-            '</div>';
           panel += '<div class="ocw-footer"><textarea id="ocw-text" class="ocw-input" placeholder="Type a message…"></textarea><div class="ocw-row"><button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:' + esc(primary) + (state.sending ? ';opacity:0.6;cursor:not-allowed;' : '') + ';width:100%"' + (state.sending ? ' disabled' : '') + '>' + (state.sending ? 'Sending...' : 'Send') + '</button></div></div>';
         }
         panel += '</div>';
