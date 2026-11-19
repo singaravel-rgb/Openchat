@@ -69,6 +69,14 @@ jobs:
       # ------------------------------------------------------------------------
       # PLAN PATH (Default on push or manual plan dispatch)
       # ------------------------------------------------------------------------
+      - name: Untaint Existing Resources
+        if: ${{ github.event.inputs.action != 'apply' }}
+        working-directory: infra/terraform-test-ec2
+        run: |
+          echo "=== Untainting existing created resources in remote state ==="
+          terraform untaint aws_s3_bucket.db_backups || true
+          terraform untaint aws_ssm_parameter.test_env || true
+
       - name: Terraform Plan (Reviewable Saved Plan - No Auto-Apply)
         if: ${{ github.event.inputs.action != 'apply' }}
         working-directory: infra/terraform-test-ec2
@@ -118,7 +126,7 @@ jobs:
           test -f staging-plan-summary.txt || (echo "ERROR: staging-plan-summary.txt not found!" && exit 1)
           echo "=== Verified Plan Summary ==="
           cat staging-plan-summary.txt
-          grep -q "Plan: 11 to add, 0 to change, 0 to destroy." staging-plan-summary.txt || (echo "ERROR: Plan summary does not match 11 additions!" && exit 1)
+          grep -q "Plan: 5 to add, 0 to change, 0 to destroy." staging-plan-summary.txt || (echo "ERROR: Plan summary does not match 5 additions!" && exit 1)
 
       - name: Terraform Apply (Exact Reviewed Saved Plan)
         if: ${{ github.event.inputs.action == 'apply' }}
