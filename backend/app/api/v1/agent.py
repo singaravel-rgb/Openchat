@@ -58,7 +58,7 @@ from app.services.ai_service import get_or_create_ai_config, get_runtime_ai_conf
 router = APIRouter(prefix="/agent", tags=["Agent Workspace"])
 
 
-def require_agent(current_user: User = Depends(require_roles("agent", "admin"))) -> User:
+def require_agent(current_user: User = Depends(require_roles("agent", "admin", "super_admin"))) -> User:
     if current_user.role == "agent" and current_user.agent_profile and not current_user.agent_profile.is_approved:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -254,7 +254,7 @@ def assign_conversation(
     if data.agent_id == current_user.id and current_user.role == "agent":
         svc_take(db, conversation, current_user)
     else:
-        if current_user.role != "admin":
+        if current_user.role not in ("admin", "super_admin"):
             raise HTTPException(status_code=403, detail="Admin only")
         svc_assign(db, conversation, current_user, data.agent_id, note=data.note)
     db.commit()
@@ -427,7 +427,7 @@ def update_conversation_status_agent(
     elif target_status == "waiting_on_customer":
         target_status = ConversationStatus.WAITING_ON_CUSTOMER
     elif target_status == "on_hold":
-        if current_user.role != "admin" and conversation.assigned_agent_id is not None:
+        if current_user.role not in ("admin", "super_admin") and conversation.assigned_agent_id is not None:
             raise HTTPException(status_code=403, detail="Only administrators can place assigned conversations On Hold")
         target_status = ConversationStatus.ON_HOLD
 
