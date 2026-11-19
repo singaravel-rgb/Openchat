@@ -12,7 +12,7 @@ from app.schemas.setting import SettingResponse, SettingUpdate, SettingsBulkUpda
 router = APIRouter(prefix="/admin/settings", tags=["Admin Settings"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 

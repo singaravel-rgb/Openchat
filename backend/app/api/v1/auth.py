@@ -237,6 +237,7 @@ def accept_invitation(
         profile = AgentProfile(
             user_id=user.id,
             is_available=True,
+            is_approved=True,
             max_conversations=5,
             active_conversations=0,
         )

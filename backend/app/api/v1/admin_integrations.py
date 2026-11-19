@@ -18,7 +18,7 @@ from app.models.widget import WidgetConfig
 router = APIRouter(prefix="/admin/integrations", tags=["Admin Integrations"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 

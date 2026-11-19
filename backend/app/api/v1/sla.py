@@ -13,7 +13,7 @@ from app.services.sla_service import get_sla_status
 router = APIRouter(prefix="/admin/sla", tags=["Admin SLA"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 

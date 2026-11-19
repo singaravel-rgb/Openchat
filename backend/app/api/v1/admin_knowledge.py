@@ -27,7 +27,7 @@ from app.schemas.knowledge import (
 router = APIRouter(prefix="/admin/knowledge", tags=["Admin Knowledge Base"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 

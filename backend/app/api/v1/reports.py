@@ -21,7 +21,7 @@ from app.services.report_service import (
 router = APIRouter(prefix="/admin/reports", tags=["Admin Reports"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 

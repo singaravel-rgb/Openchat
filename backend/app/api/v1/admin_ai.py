@@ -22,7 +22,7 @@ from app.services.ai_service import get_or_create_ai_config, get_runtime_ai_conf
 router = APIRouter(prefix="/admin/ai", tags=["Admin AI"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 

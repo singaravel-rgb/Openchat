@@ -10,7 +10,7 @@ from app.services.widget_service import get_or_create_widget_config, update_widg
 router = APIRouter(prefix="/admin/widget", tags=["Admin Widget"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 

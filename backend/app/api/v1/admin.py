@@ -46,7 +46,7 @@ from app.services.sla_service import record_first_response
 router = APIRouter(prefix="/admin", tags=["Admin Workspace"])
 
 
-def require_admin(current_user: User = Depends(require_roles("admin"))) -> User:
+def require_admin(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 
