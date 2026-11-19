@@ -391,7 +391,15 @@ def link_conversation_endpoint(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     ensure_can_modify(current_user, conversation)
-    return link_conversations(db, conversation_id, data.target_conversation_id, current_user)
+    target_id = data.target_conversation_id
+    if not target_id and data.target_chat_id:
+        target_conv = db.query(Conversation).filter(func.lower(Conversation.chat_id) == data.target_chat_id.strip().lower()).first()
+        if not target_conv:
+            raise HTTPException(status_code=404, detail=f"Target conversation with Chat ID '{data.target_chat_id}' not found")
+        target_id = target_conv.id
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Target conversation ID or Chat ID is required")
+    return link_conversations(db, conversation_id, target_id, current_user)
 
 
 @router.delete("/conversations/{conversation_id}/link/{target_id}")
@@ -422,10 +430,19 @@ def merge_conversation_endpoint(
         raise HTTPException(status_code=400, detail=f"Source conversation #{conversation_id} is already merged into #{conversation.merged_into_id}")
     ensure_can_modify(current_user, conversation)
 
+    target_id = data.target_conversation_id
+    if not target_id and data.target_chat_id:
+        target_conv = db.query(Conversation).filter(func.lower(Conversation.chat_id) == data.target_chat_id.strip().lower()).first()
+        if not target_conv:
+            raise HTTPException(status_code=404, detail=f"Target conversation with Chat ID '{data.target_chat_id}' not found")
+        target_id = target_conv.id
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Target conversation ID or Chat ID is required")
+
     target = merge_conversations(
         db=db,
         source_id=conversation_id,
-        target_id=data.target_conversation_id,
+        target_id=target_id,
         actor=current_user,
         confirm_cross_customer=data.confirm_cross_customer,
     )

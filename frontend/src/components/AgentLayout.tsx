@@ -219,7 +219,11 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
                         type="button"
                         onClick={() => {
                           setProfileMenuOpen(false);
-                          router.push(user?.role === 'admin' ? '/admin/settings' : '/agent');
+                          router.push(
+                            user?.role === 'admin' || user?.role === 'super_admin'
+                              ? '/admin/settings'
+                              : '/agent/settings'
+                          );
                         }}
                         className="w-full rounded px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
                       >

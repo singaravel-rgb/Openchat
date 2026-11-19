@@ -748,9 +748,14 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   // Link & Merge handlers
   const handleLinkConversation = useCallback(async () => {
     if (!selectedConversation || !linkTargetId.trim()) return;
-    const targetIdNum = parseInt(linkTargetId.trim(), 10);
+    const trimmed = linkTargetId.trim();
+    let targetIdNum: number | null = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : null;
+    if (!targetIdNum) {
+      const match = conversations.find((c) => c.chat_id?.toLowerCase() === trimmed.toLowerCase());
+      if (match) targetIdNum = match.id;
+    }
     if (!targetIdNum || isNaN(targetIdNum)) {
-      setError('Please enter a valid numeric conversation ID');
+      setError('Please enter a valid numeric conversation ID or Chat ID (e.g. OC-2026-000001)');
       return;
     }
     setIsLinking(true);
@@ -767,7 +772,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     } finally {
       setIsLinking(false);
     }
-  }, [selectedConversation, linkTargetId, loadConversation]);
+  }, [selectedConversation, linkTargetId, conversations, loadConversation]);
 
   const handleUnlinkConversation = useCallback(async (targetId: number) => {
     if (!selectedConversation) return;
@@ -783,9 +788,14 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
 
   const handleMergeConversation = useCallback(async () => {
     if (!selectedConversation || !mergeTargetId.trim() || !confirmMergeExplicit) return;
-    const targetIdNum = parseInt(mergeTargetId.trim(), 10);
+    const trimmed = mergeTargetId.trim();
+    let targetIdNum: number | null = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : null;
+    if (!targetIdNum) {
+      const match = conversations.find((c) => c.chat_id?.toLowerCase() === trimmed.toLowerCase());
+      if (match) targetIdNum = match.id;
+    }
     if (!targetIdNum || isNaN(targetIdNum)) {
-      setError('Please enter a valid numeric target conversation ID');
+      setError('Please enter a valid numeric target conversation ID or Chat ID (e.g. OC-2026-000001)');
       return;
     }
     setIsMerging(true);
@@ -810,7 +820,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     } finally {
       setIsMerging(false);
     }
-  }, [selectedConversation, mergeTargetId, confirmCrossCustomer, confirmMergeExplicit, loadConversations, loadConversation, router, userRole]);
+  }, [selectedConversation, mergeTargetId, confirmCrossCustomer, confirmMergeExplicit, conversations, loadConversations, loadConversation, router, userRole]);
 
   const handleDeleteConversation = useCallback(async () => {
     if (!selectedConversation) return;
@@ -2070,7 +2080,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
             aria-label={rightPanelOpen ? 'Close details panel' : 'Open details panel'}
             className="shadow-lg"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={rightPanelOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
             </svg>
           </Button>
@@ -2095,7 +2105,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               aria-label="Expand customer details"
               className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={rightPanelOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
               </svg>
             </Button>
@@ -2109,7 +2119,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 }}
                 className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
               </button>
@@ -2122,7 +2132,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 }}
                 className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </button>
@@ -2135,7 +2145,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 }}
                 className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </button>
@@ -2148,7 +2158,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 }}
                 className="rounded p-2 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </button>
@@ -2166,7 +2176,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 aria-label="Collapse details panel"
                 className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={rightPanelOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
                 </svg>
               </Button>
@@ -2606,11 +2616,14 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Unassign (Return to Queue)</option>
-                  {agents.map((agent) => (
-                    <option key={agent.id} value={String(agent.id)}>
-                      {agent.full_name} ({agent.email}) — {agent.is_available ? '🟢 Available' : '⚪ Unavailable'} ({agent.active_conversations ?? 0}/{agent.max_conversations ?? 5} active)
-                    </option>
-                  ))}
+                  {agents.map((agent) => {
+                    const isOffline = !agent.is_available;
+                    return (
+                      <option key={agent.id} value={String(agent.id)} disabled={isOffline}>
+                        {agent.full_name} ({agent.email}) — {agent.is_available ? '🟢 Available' : '🔴 Offline (Cannot Assign)'} ({agent.active_conversations ?? 0}/{agent.max_conversations ?? 5} active)
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div>
@@ -2627,7 +2640,13 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 <Button variant="secondary" onClick={() => { setShowAssignModal(false); setAssignAgentId(''); setAssignNote(''); }}>
                   Cancel
                 </Button>
-                <Button onClick={handleAssign} disabled={!assignAgentId && assignAgentId !== ''}>
+                <Button
+                  onClick={handleAssign}
+                  disabled={
+                    (!assignAgentId && assignAgentId !== '') ||
+                    Boolean(assignAgentId && agents.find((a) => String(a.id) === assignAgentId)?.is_available === false)
+                  }
+                >
                   Assign
                 </Button>
               </div>
@@ -2758,12 +2777,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               </p>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Target Conversation ID
+                  Target Conversation ID or Chat ID
                 </label>
                 <Input
                   value={linkTargetId}
                   onChange={(e) => setLinkTargetId(e.target.value)}
-                  placeholder="e.g. 42"
+                  placeholder="e.g. 42 or OC-2026-000001"
                   className="w-full"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -2787,7 +2806,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       )}
 
       {showMergeModal && (() => {
-        const targetConv = conversations.find(c => String(c.id) === mergeTargetId.trim());
+        const trimmed = mergeTargetId.trim();
+        const targetConv = conversations.find(
+          (c) =>
+            String(c.id) === trimmed ||
+            (c.chat_id && c.chat_id.toLowerCase() === trimmed.toLowerCase())
+        );
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
             <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-lg w-full">
@@ -2804,12 +2828,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Target Conversation ID to Merge Into
+                    Target Conversation ID or Chat ID to Merge Into
                   </label>
                   <Input
                     value={mergeTargetId}
                     onChange={(e) => setMergeTargetId(e.target.value)}
-                    placeholder="e.g. 101"
+                    placeholder="e.g. 101 or OC-2026-000001"
                     className="w-full"
                   />
                 </div>
@@ -2820,15 +2844,15 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-2 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                       <div className="font-semibold text-slate-900 dark:text-white mb-1">Source (Will be Closed)</div>
-                      <div className="text-slate-600 dark:text-slate-400"><strong>ID:</strong> #{selectedConversation?.id}</div>
+                      <div className="text-slate-600 dark:text-slate-400"><strong>ID:</strong> {selectedConversation?.chat_id || `#${selectedConversation?.id}`}</div>
                       <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Subject:</strong> {selectedConversation?.subject || 'No subject'}</div>
                       <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Customer:</strong> {selectedConversation?.customer_name || 'Customer'} {selectedConversation?.customer_email ? `(${selectedConversation.customer_email})` : ''}</div>
                     </div>
                     <div className="p-2 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
                       <div className="font-semibold text-slate-900 dark:text-white mb-1">Target (Will Receive Messages)</div>
-                      <div className="text-slate-600 dark:text-slate-400"><strong>ID:</strong> {mergeTargetId.trim() ? `#${mergeTargetId.trim()}` : '—'}</div>
-                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Subject:</strong> {targetConv?.subject || (mergeTargetId.trim() ? 'Target conversation' : '—')}</div>
-                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Customer:</strong> {targetConv ? `${targetConv.customer_name} (${targetConv.customer_email || 'No email'})` : (mergeTargetId.trim() ? 'Verified on merge' : '—')}</div>
+                      <div className="text-slate-600 dark:text-slate-400"><strong>ID:</strong> {targetConv?.chat_id || (targetConv?.id ? `#${targetConv.id}` : (trimmed ? `#${trimmed}` : '—'))}</div>
+                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Subject:</strong> {targetConv?.subject || (trimmed ? 'Target conversation' : '—')}</div>
+                      <div className="text-slate-600 dark:text-slate-400 truncate"><strong>Customer:</strong> {targetConv ? `${targetConv.customer_name} (${targetConv.customer_email || 'No email'})` : (trimmed ? 'Verified on merge' : '—')}</div>
                     </div>
                   </div>
                 </div>

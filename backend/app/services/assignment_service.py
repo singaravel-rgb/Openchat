@@ -130,9 +130,11 @@ def reassign_conversation(db: Session, conversation: Conversation, new_agent_id:
         release_agent_capacity(db, conversation.assigned_agent_id)
 
     if new_agent_id:
-        new_agent = db.query(User).filter(User.id == new_agent_id, User.role == "agent").first()
+        new_agent = db.query(User).filter(User.id == new_agent_id, User.role == "agent", User.is_active == True).first()
         if new_agent:
             new_agent_profile = new_agent.agent_profile
+            if not new_agent_profile or not new_agent_profile.is_available:
+                return False
             active_count = db.query(func.count(Conversation.id)).filter(
                 Conversation.assigned_agent_id == new_agent.id,
                 Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),

@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
 import { useNotifications } from '@/context/NotificationContext';
+import { useAuth } from '@/context/AuthContext';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { format } from 'date-fns';
 import type { Notification } from '@/lib/types';
 
 export function NotificationBell() {
+  const router = useRouter();
+  const { user } = useAuth();
   const { notifications, unreadCount, isLoading, markAsRead, markAllAsRead, fetchNotifications } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -28,13 +32,16 @@ export function NotificationBell() {
     if (!notification.is_read) {
       await markAsRead(notification.id);
     }
-    // TODO: Navigate based on notification reference
     if (notification.reference_type === 'conversation' && notification.reference_id) {
-      window.location.href = `/agent/conversations/${notification.reference_id}`;
+      const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+      const targetPath = isAdmin
+        ? `/admin/conversations/${notification.reference_id}`
+        : `/agent/conversations/${notification.reference_id}`;
+      router.push(targetPath);
     } else if (notification.reference_type === 'faq' && notification.reference_id) {
-      window.location.href = `/admin/faqs`;
+      router.push('/admin/faqs');
     } else if (notification.reference_type === 'article' && notification.reference_id) {
-      window.location.href = `/admin/articles`;
+      router.push('/admin/articles');
     }
     setIsOpen(false);
   };
@@ -101,7 +108,7 @@ export function NotificationBell() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading && notifications.length === 0) {
     return (
       <div className="relative">
         <Button variant="ghost" size="icon" className="relative">

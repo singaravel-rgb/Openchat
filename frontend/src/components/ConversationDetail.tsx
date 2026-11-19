@@ -16,6 +16,7 @@ interface AgentListItem {
   id: number;
   full_name: string;
   email: string;
+  is_available?: boolean;
 }
 
 interface ConversationDetailProps {
@@ -26,7 +27,9 @@ interface ConversationDetailProps {
 
 export function ConversationDetailView({ conversation, onUpdate, mode }: ConversationDetailProps) {
   const { user } = useAuth();
-  const resolvedMode = mode || (user?.role === 'admin' ? 'admin' : 'agent');
+  const resolvedMode =
+    mode ||
+    (user?.role === 'admin' || user?.role === 'super_admin' ? 'admin' : 'agent');
   const api = resolvedMode === 'admin' ? adminApi : agentApi;
 
   const [messages, setMessages] = useState<Message[]>(conversation.messages);
@@ -206,10 +209,26 @@ export function ConversationDetailView({ conversation, onUpdate, mode }: Convers
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Assign Agent</label>
                 <select value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
                   <option value="">Unassigned (queue)</option>
-                  {agents.map(a => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+                  {agents.map(a => (
+                    <option key={a.id} value={a.id} disabled={!a.is_available}>
+                      {a.full_name} {a.is_available ? '🟢 (Available)' : '🔴 (Offline)'}
+                    </option>
+                  ))}
                 </select>
               </div>
-              <div className="md:col-span-1"><Button variant="outline" size="sm" onClick={handleAssign} disabled={isLoading}>Update Assignment</Button></div>
+              <div className="md:col-span-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAssign}
+                  disabled={
+                    isLoading ||
+                    Boolean(assignAgentId && agents.find((a) => String(a.id) === assignAgentId)?.is_available === false)
+                  }
+                >
+                  Update Assignment
+                </Button>
+              </div>
               <Input label="Resolution details" value={resolutionDetails} onChange={(e) => setResolutionDetails(e.target.value)} placeholder="Optional summary for resolve/close" />
             </div>
           )}

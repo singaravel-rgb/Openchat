@@ -88,7 +88,7 @@ function NavItem({
           .filter(Boolean)
           .join(' ')}
       >
-        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center [&>svg]:h-5 [&>svg]:w-5">
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center [&>svg]:h-4.5 [&>svg]:w-4.5">
           {item.icon}
         </span>
         {!collapsed && (
@@ -206,7 +206,10 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: SidebarProps)
       aria-label="Main navigation"
     >
       <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-slate-800 px-3">
-        <Link href={user.role === 'admin' ? '/admin' : '/agent'} className="flex min-w-0 items-center gap-3">
+        <Link
+          href={user.role === 'admin' || user.role === 'super_admin' ? '/admin' : '/agent'}
+          className="flex min-w-0 items-center gap-3"
+        >
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-blue-600">
             <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path

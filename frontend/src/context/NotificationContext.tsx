@@ -20,7 +20,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (silent = false) => {
     // Poll silently: before the auth token is hydrated (login/refresh) the API
     // answers 401, which must not spam the console or clear the badge.
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -29,7 +29,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const [listResult, countResult] = await Promise.all([
         notificationApi.list({ limit: 50 }),
         notificationApi.getUnreadCount(),
@@ -39,7 +39,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       // 401 triggers a redirect in the API client; ignore transient failures.
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
@@ -67,6 +67,23 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     fetchNotifications();
+
+    const intervalId = setInterval(() => {
+      fetchNotifications(true);
+    }, 8000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   return (

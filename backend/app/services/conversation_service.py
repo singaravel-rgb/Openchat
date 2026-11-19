@@ -379,9 +379,14 @@ def assign_conversation(db: Session, conversation: Conversation, actor: User, ag
     if not agent.is_active:
         raise HTTPException(status_code=400, detail="Target agent is inactive")
 
-    # Check capacity of target agent
+    # Check availability and capacity of target agent
     profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
     if profile:
+        if not profile.is_available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Agent {agent.full_name} is currently offline and cannot receive new assignments",
+            )
         live_active = (
             db.query(Conversation)
             .filter(
@@ -466,6 +471,8 @@ def take_conversation(db: Session, conversation: Conversation, agent: User) -> C
         raise HTTPException(status_code=409, detail="Conversation cannot be taken")
 
     profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
+    if profile and not profile.is_available:
+        raise HTTPException(status_code=400, detail="You are currently offline. Please set your status to Online before taking conversations.")
     if profile and profile.active_conversations >= profile.max_conversations:
         raise HTTPException(status_code=409, detail="Agent at capacity")
 
@@ -783,6 +790,24 @@ async def process_customer_message(
             import logging
             logging.getLogger(__name__).exception("AI response failed")
 
+    # Notify assigned agent of customer reply if conversation is assigned
+    if conversation.assigned_agent_id and conversation.status in (ConversationStatus.ASSIGNED, ConversationStatus.OPEN):
+        try:
+            from app.models.notification import NotificationType, NotificationPriority
+            from app.services.notification_service import create_notification
+            create_notification(
+                db=db,
+                user_id=conversation.assigned_agent_id,
+                type=NotificationType.NEW_MESSAGE,
+                title=f"New message in {conversation.chat_id or f'#{conversation.id}'}",
+                message=f"{customer.full_name}: {content[:120]}",
+                reference_type="conversation",
+                reference_id=conversation.id,
+                priority=NotificationPriority.HIGH,
+            )
+        except Exception:
+            pass
+
     db.commit()
     db.refresh(customer_msg)
     return customer_msg
@@ -1004,6 +1029,13 @@ def merge_conversations(
     tasks = db.query(ConversationTask).filter(ConversationTask.conversation_id == source_id).all()
     for task in tasks:
         task.conversation_id = target_id
+
+    # 3b. Preserve global internal note from merged conversation
+    if source.global_note:
+        source_note_tag = f"\n\n--- [Internal Note Merged from {source.chat_id or f'#{source_id}'}] ---\n{source.global_note}"
+        target.global_note = (target.global_note or "") + source_note_tag
+        target.global_note_updated_at = _utcnow()
+        target.global_note_updated_by_id = actor.id
 
     # 4. Update source conversation status
     source.status = ConversationStatus.MERGED

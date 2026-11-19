@@ -49,13 +49,13 @@ export default function CampaignsPage() {
   useEffect(() => {
     if (!authLoading && !user) {
       router.push("/login");
-    } else if (user && user.role !== "admin") {
+    } else if (user && user.role !== "admin" && user.role !== "super_admin") {
       router.push("/agent");
     }
   }, [user, authLoading, router]);
 
   const loadData = async () => {
-    if (!user || user.role !== "admin") return;
+    if (!user || (user.role !== "admin" && user.role !== "super_admin")) return;
 
     setIsLoading(true);
     setError(null);

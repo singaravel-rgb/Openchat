@@ -76,7 +76,8 @@ class ConversationResponse(BaseModel):
 
 
 class ConversationLinkCreate(BaseModel):
-    target_conversation_id: int
+    target_conversation_id: Optional[int] = None
+    target_chat_id: Optional[str] = None
 
 
 class ConversationLinkItem(BaseModel):
@@ -93,7 +94,8 @@ class ConversationLinkItem(BaseModel):
 
 
 class ConversationMergeRequest(BaseModel):
-    target_conversation_id: int
+    target_conversation_id: Optional[int] = None
+    target_chat_id: Optional[str] = None
     confirm_cross_customer: bool = False
 
 

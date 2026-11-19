@@ -72,7 +72,7 @@ def create_notification(
     if notification_in.user_id != current_user.id:
         from app.models.user import User as UserModel
         current_user_obj = db.get(UserModel, current_user.id)
-        if not current_user_obj or current_user_obj.role != "admin":
+        if not current_user_obj or current_user_obj.role not in ("admin", "super_admin"):
             raise HTTPException(status_code=403, detail="Not authorized to create notifications for other users")
 
     notification = Notification(
