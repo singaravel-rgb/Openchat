@@ -78,10 +78,10 @@ fi
 
 # 4. Execute Alembic Migrations
 echo "[4/5] Running Alembic database migrations..."
-docker compose -f "${COMPOSE_FILE}" run --rm backend alembic upgrade head
+docker compose -f "${COMPOSE_FILE}" run --rm backend alembic -c backend/alembic.ini upgrade head
 
 echo "[*] Verifying current migration revision..."
-docker compose -f "${COMPOSE_FILE}" run --rm backend alembic current
+docker compose -f "${COMPOSE_FILE}" run --rm backend alembic -c backend/alembic.ini current
 
 # 5. Summary & Next Steps
 echo "[5/5] Preflight and migrations completed successfully!"
