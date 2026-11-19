@@ -43,7 +43,7 @@ def seed_kb():
                     slug=cdata["slug"],
                     description=cdata["description"],
                     display_order=cdata["display_order"],
-                    is_visible=True,
+                    is_active=True,
                 )
                 db.add(cat)
                 db.flush()
