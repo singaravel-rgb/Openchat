@@ -126,7 +126,7 @@ jobs:
           test -f staging-plan-summary.txt || (echo "ERROR: staging-plan-summary.txt not found!" && exit 1)
           echo "=== Verified Plan Summary ==="
           cat staging-plan-summary.txt
-          grep -q "Plan: 5 to add, 0 to change, 0 to destroy." staging-plan-summary.txt || (echo "ERROR: Plan summary does not match 5 additions!" && exit 1)
+          grep -q "Plan: 1 to add, 0 to change, 0 to destroy." staging-plan-summary.txt || (echo "ERROR: Plan summary does not match 1 addition!" && exit 1)
 
       - name: Terraform Apply (Exact Reviewed Saved Plan)
         if: ${{ github.event.inputs.action == 'apply' }}

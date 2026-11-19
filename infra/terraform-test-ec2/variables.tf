@@ -17,9 +17,9 @@ variable "environment" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for test host (t4g.medium ARM64 or t3.medium x86)"
+  description = "EC2 instance type for test host (t4g.small ARM64 or t3.small x86)"
   type        = string
-  default     = "t4g.medium" # 2 vCPU, 4 GB RAM, ~$24.53/mo
+  default     = "t4g.small" # 2 vCPU, 2 GB RAM (Free Tier eligible), ~$12.26/mo
 }
 
 variable "volume_size" {
