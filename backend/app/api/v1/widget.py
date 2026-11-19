@@ -335,10 +335,34 @@ async def send_message(
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id, Conversation.customer_id == user.id).first()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    if conversation.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
-        raise HTTPException(status_code=409, detail="This conversation is no longer accepting messages")
+    if conversation.status == ConversationStatus.CLOSED:
+        raise HTTPException(status_code=409, detail="This conversation is closed and no longer accepting messages")
+    if conversation.status == ConversationStatus.RESOLVED:
+        from app.services.conversation_service import reopen_conversation
+        reopen_conversation(db, conversation, user)
+        db.flush()
     msg = await process_customer_message(db, conversation, user, data.content, client_message_id=data.client_message_id)
     return _msg_to_widget(msg)
+
+
+@router.post("/conversations/{conversation_id}/reopen")
+def reopen_widget_conversation(
+    conversation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_widget_session: str | None = Header(None),
+):
+    rate_limit_for_request(request, "widget:reopen", 30, 60)
+    cfg = _cfg_or_503(db)
+    validate_widget_origin(cfg, request, require_when_configured=True)
+    _, user = require_widget_session(db, request, x_widget_session)
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id, Conversation.customer_id == user.id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    from app.services.conversation_service import reopen_conversation
+    reopen_conversation(db, conversation, user)
+    db.commit()
+    return {"message": "Conversation reopened successfully", "status": conversation.status}
 
 
 @router.post("/conversations/{conversation_id}/request-human")
