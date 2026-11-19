@@ -1,6 +1,6 @@
 output "public_ip" {
-  description = "Stable Public IPv4 Address for OpenChat Test Server"
-  value       = aws_eip.test_host.public_ip
+  description = "Public IPv4 Address for OpenChat Test Server (Outbound connectivity)"
+  value       = aws_instance.test_host.public_ip
 }
 
 output "instance_id" {
@@ -10,7 +10,12 @@ output "instance_id" {
 
 output "ssm_session_command" {
   description = "Command to open secure terminal session via AWS Systems Manager without SSH keys"
-  value       = "aws ssm start-session --target ${aws_instance.test_host.id}"
+  value       = "aws ssm start-session --target ${aws_instance.test_host.id} --region ${var.aws_region}"
+}
+
+output "ssm_port_forward_command" {
+  description = "Command to open SSM port forwarding to localhost:8080"
+  value       = "aws ssm start-session --target ${aws_instance.test_host.id} --document-name AWS-StartPortForwardingSession --parameters '{\"portNumber\":[\"80\"],\"localPortNumber\":[\"8080\"]}' --region ${var.aws_region}"
 }
 
 output "s3_backup_bucket" {
@@ -19,6 +24,6 @@ output "s3_backup_bucket" {
 }
 
 output "application_url" {
-  description = "Application HTTPS URL (or HTTP if testing pre-DNS)"
-  value       = "https://${aws_eip.test_host.public_ip}"
+  description = "Local Application URL via SSM port forwarding"
+  value       = "http://localhost:8080"
 }

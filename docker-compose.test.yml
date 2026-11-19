@@ -53,20 +53,85 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/2
       SECRET_KEY: ${SECRET_KEY:?Required}
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080","http://127.0.0.1:8080","http://localhost:3000"]}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
       timeout: 5s
       retries: 3
 
+  celery-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: openchat-celery-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "app.core.celery_app:celery_app", "worker", "-l", "info", "--concurrency", "2"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: testing
+      POSTGRES_DB: ${POSTGRES_DB:-openchat}
+      POSTGRES_USER: ${POSTGRES_USER:-openchat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-openchat}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-openchat}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/2
+      SECRET_KEY: ${SECRET_KEY:?Required}
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: openchat-celery-beat
+    restart: unless-stopped
+    command: ["celery", "-A", "app.core.celery_app:celery_app", "beat", "-l", "info"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
+    environment:
+      ENVIRONMENT: testing
+      POSTGRES_DB: ${POSTGRES_DB:-openchat}
+      POSTGRES_USER: ${POSTGRES_USER:-openchat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-openchat}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-openchat}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/2
+      SECRET_KEY: ${SECRET_KEY:?Required}
+
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     container_name: openchat-frontend
     restart: unless-stopped
     depends_on:
@@ -74,7 +139,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
 
   nginx:
     image: nginx:alpine
@@ -85,11 +150,8 @@ services:
       - frontend
     ports:
       - "80:80"
-      - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - ./nginx/certbot:/var/www/certbot:ro
+      - ./nginx/nginx.staging.conf:/etc/nginx/nginx.conf:ro
       - ./widget:/var/www/widget:ro
 
 volumes:

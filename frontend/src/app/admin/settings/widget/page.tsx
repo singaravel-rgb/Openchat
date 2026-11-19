@@ -64,7 +64,12 @@ const defaults: WidgetConfig = {
 export default function WidgetConfigurationPage() {
   const [config, setConfig] = useState<WidgetConfig>(defaults);
   const [domainsText, setDomainsText] = useState('');
-  const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
+  const [backendUrl, setBackendUrl] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return window.location.origin;
+    }
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  });
   const [snippet, setSnippet] = useState('');
   const [scriptUrl, setScriptUrl] = useState('');
   const [loading, setLoading] = useState(true);
@@ -286,7 +291,7 @@ export default function WidgetConfigurationPage() {
               label="Backend API Base URL"
               value={backendUrl}
               onChange={(e) => handleBackendUrlChange(e.target.value)}
-              placeholder="http://localhost:8000"
+              placeholder={typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000'}
             />
             <p className="text-xs text-slate-500">
               The public URL where your OpenChat FastAPI backend is accessible by customer browsers.
@@ -298,7 +303,7 @@ export default function WidgetConfigurationPage() {
               Copyable Embed Script Tag
             </label>
             <div className="bg-slate-900 p-4 rounded-lg font-mono text-sm text-green-400 overflow-x-auto break-all border border-slate-700">
-              {snippet || `<script src="${scriptUrl || 'http://localhost:8000/api/v1/widget/embed.js'}" async></script>`}
+              {snippet || `<script src="${scriptUrl || `${backendUrl}/api/v1/widget/embed.js`}" async></script>`}
             </div>
             {scriptUrl && (
               <p className="text-xs text-slate-500">

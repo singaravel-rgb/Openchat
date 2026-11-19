@@ -1,8 +1,8 @@
 # ==============================================================================
-# OpenChat Remote State Backend Configuration (Example Template)
+# OpenChat Remote State Backend Configuration (S3 with Native State Locking)
 # 
-# Once the remote state S3 bucket and DynamoDB lock table are provisioned
-# (see instructions in docs/TERRAFORM_STATE.md), rename or copy this file to:
+# Once the remote state S3 bucket is provisioned in ap-south-1,
+# copy or rename this file to:
 #   backend.tf
 # and run:
 #   terraform init -migrate-state
@@ -10,10 +10,10 @@
 
 # terraform {
 #   backend "s3" {
-#     bucket         = "openchat-terraform-state-<ACCOUNT_ID>"
-#     key            = "test-ec2/terraform.tfstate"
-#     region         = "us-east-1"
-#     encrypt        = true
-#     dynamodb_table = "openchat-terraform-locks"
+#     bucket       = "openchat-terraform-state-051372063142"
+#     key          = "test-ec2/terraform.tfstate"
+#     region       = "ap-south-1"
+#     encrypt      = true
+#     use_lockfile = true
 #   }
 # }

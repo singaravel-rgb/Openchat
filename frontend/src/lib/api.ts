@@ -1,6 +1,42 @@
 import type { Token, User, UserDetail, UserInvitation, ConversationListItem, ConversationDetail, MessageCreate, ConversationCreate, AgentWorkload, ConversationTask, AdminStats, AdminAgent, AuditLogItem, Category, Article, FAQ, Notification, NotificationList, ConversationMetrics, AgentPerformance, TimeSeriesPoint, KnowledgeBaseMetrics, ReportFilters, ExportRequest, SLAConfig, SLAConfigCreate, SLAConfigUpdate, SLAStatus, AIConfig, AIConfigUpdate, AITestRequest, AITestResponse, AIUsageSummary, SettingResponse, Attachment, AttachmentUploadResponse, CannedResponse, CannedResponseCreate, CannedResponseUpdate, CannedResponseUseResponse, CustomField, CustomFieldCreate, CustomFieldUpdate, ConversationCustomFieldValue, ConversationCustomFieldSet, Team, TeamCreate, TeamUpdate, TeamMemberAdd, Department, DepartmentCreate, DepartmentUpdate, BusinessHours, BusinessHoursCreate, BusinessHoursUpdate, Holiday, HolidayCreate, HolidayUpdate, BusinessOpenStatus, BotFlow, BotFlowCreate, BotFlowUpdate, BotFlowStep, BotFlowStepCreate, BotFlowStepUpdate, BotFlowIssue, BotFlowIssueCreate, BotFlowIssueUpdate, BotFlowPublish, Webhook, WebhookCreate, WebhookUpdate, WebhookDeliveryResponse, WebhookTest, AutomationRule, AutomationRuleCreate, AutomationRuleUpdate, AutomationRuleExecution, Campaign, CampaignCreate, CampaignUpdate, CampaignMessageResponse, CampaignLaunch, GlobalNoteResponse, AIFlowConfig, AIFlowResponse, ConversationLinkItem } from './types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+/**
+ * Normalizes the API base URL:
+ * - If NEXT_PUBLIC_API_URL is unset or empty, defaults to '' (same-origin relative URL).
+ * - Strips trailing slashes.
+ * - Strips trailing '/api/v1' to avoid duplicate path segments.
+ */
+export function resolveApiBase(): string {
+  const raw = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (!raw) {
+    return '';
+  }
+  let base = raw.replace(/\/+$/, '');
+  base = base.replace(/\/api\/v1$/, '');
+  return base;
+}
+
+export const API_BASE = resolveApiBase();
+
+/**
+ * Builds a clean, normalized API URL with a single '/api/v1' prefix.
+ * Handles both relative and absolute base URLs without duplicate prefixes.
+ */
+export function buildApiUrl(endpoint: string): string {
+  const base = resolveApiBase();
+  let cleanEndpoint = endpoint.trim();
+  if (cleanEndpoint.startsWith('/api/v1/')) {
+    cleanEndpoint = cleanEndpoint.substring('/api/v1'.length);
+  } else if (cleanEndpoint.startsWith('api/v1/')) {
+    cleanEndpoint = cleanEndpoint.substring('api/v1'.length);
+  } else if (cleanEndpoint === '/api/v1' || cleanEndpoint === 'api/v1') {
+    cleanEndpoint = '';
+  }
+  if (!cleanEndpoint.startsWith('/')) {
+    cleanEndpoint = `/${cleanEndpoint}`;
+  }
+  return `${base}/api/v1${cleanEndpoint}`;
+}
 
 function getAuthHeader(): { Authorization?: string } {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -18,15 +54,17 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   }
 
   let response: Response;
+  const targetUrl = buildApiUrl(endpoint);
   try {
-    response = await fetch(`${API_BASE}/api/v1${endpoint}`, {
+    response = await fetch(targetUrl, {
       ...options,
       headers,
     });
   } catch (err) {
     // Browsers report network/CORS/preflight failures as a bare TypeError.
+    const apiDisplay = resolveApiBase() || (typeof window !== 'undefined' ? window.location.origin : 'API endpoint');
     throw new Error(
-      `Cannot reach the OpenChat API at ${API_BASE}. Check that the backend is running and that this origin is allowed in CORS settings.`,
+      `Cannot reach the OpenChat API at ${apiDisplay}. Check that the backend is running and that this origin is allowed in CORS settings.`,
     );
   }
 
@@ -695,7 +733,7 @@ export const attachmentApi = {
     fetchApi<Attachment[]>(`/attachments/conversation/${conversationId}`),
 
   download: (attachmentId: number) =>
-    fetch(`${API_BASE}/api/v1/attachments/${attachmentId}/download`, {
+    fetch(buildApiUrl(`/attachments/${attachmentId}/download`), {
       headers: getAuthHeader(),
     }),
 

@@ -13,9 +13,9 @@ terraform {
 }
 
 variable "aws_profile" {
-  description = "AWS CLI profile name for deployment"
+  description = "AWS CLI profile name for deployment (optional if environment credentials are used)"
   type        = string
-  default     = "openchat-test"
+  default     = null
 }
 
 provider "aws" {

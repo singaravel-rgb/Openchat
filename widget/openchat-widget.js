@@ -12,8 +12,9 @@
   })();
   var backendBase = (window.OpenChatConfig && (window.OpenChatConfig.backendUrl || window.OpenChatConfig.apiUrl)) ||
                     (currentScript && currentScript.getAttribute('data-backend-url')) ||
-                    "http://localhost:8000";
+                    (typeof window !== 'undefined' && window.location && window.location.origin ? window.location.origin : "http://localhost:8000");
   backendBase = backendBase.replace(/\/+$/, '');
+  backendBase = backendBase.replace(/\/api\/v1(?:\/widget)?$/, '');
   var API_BASE = backendBase + "/api/v1/widget";
   var STORAGE_KEY = "openchat_widget_session";
 

@@ -34,7 +34,8 @@ REDIS_PASSWORD=${random_password.redis_auth.result}
 SECRET_KEY=${random_password.jwt_secret.result}
 AI_PROVIDER=gemini
 GEMINI_API_KEY=
-ALLOWED_ORIGINS=*
+CORS_ORIGINS=["http://localhost:8080","http://127.0.0.1:8080","http://localhost:3000"]
+ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000
 EOT
 
   tags = {

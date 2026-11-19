@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
+import urllib.parse
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -55,8 +57,8 @@ class Settings(BaseSettings):
     ]
 
     # Celery / background tasks
-    celery_broker_url: str = "redis://:redispass@127.0.0.1:6379/1"
-    celery_result_backend: str = "redis://:redispass@127.0.0.1:6379/2"
+    celery_broker_url: str | None = None
+    celery_result_backend: str | None = None
 
     # SMTP / Email
     smtp_host: str = "localhost"
@@ -89,6 +91,38 @@ class Settings(BaseSettings):
     host_identity_issuer: str | None = None
     host_identity_audience: str = "openchat-widget"
     host_identity_public_key: str | None = None
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: any) -> list[str]:
+        if "CORS_ORIGINS" not in os.environ and "ALLOWED_ORIGINS" in os.environ:
+            v = os.environ.get("ALLOWED_ORIGINS")
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                try:
+                    import json
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if item]
+                except Exception:
+                    pass
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        elif isinstance(v, (list, tuple, set)):
+            return [str(origin).strip() for origin in v if origin]
+        return v
+
+    @model_validator(mode="after")
+    def assemble_celery_urls(self):
+        auth_part = ""
+        if self.redis_password:
+            encoded_pwd = urllib.parse.quote(self.redis_password, safe="")
+            auth_part = f":{encoded_pwd}@"
+        if not self.celery_broker_url:
+            self.celery_broker_url = f"redis://{auth_part}{self.redis_host}:{self.redis_port}/1"
+        if not self.celery_result_backend:
+            self.celery_result_backend = f"redis://{auth_part}{self.redis_host}:{self.redis_port}/2"
+        return self
 
     @property
     def database_url(self) -> URL | str:
