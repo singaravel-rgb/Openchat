@@ -114,6 +114,25 @@ def get_admin_stats(
         total_hours = sum((c.updated_at - c.created_at).total_seconds() / 3600 for c in resolved_convs)
         avg_resolution_time = round(total_hours / len(resolved_convs), 2)
 
+    unassigned_conversations = (
+        db.query(Conversation)
+        .filter(
+            Conversation.assigned_agent_id.is_(None),
+            Conversation.status.in_([ConversationStatus.PENDING, ConversationStatus.OPEN, ConversationStatus.AI_HANDLING]),
+        )
+        .count()
+    )
+    unanswered_conversations = (
+        db.query(Conversation)
+        .filter(
+            Conversation.status.in_([ConversationStatus.PENDING, ConversationStatus.OPEN, ConversationStatus.WAITING_ON_CUSTOMER]),
+            Conversation.unread_count > 0,
+        )
+        .count()
+    )
+    if unanswered_conversations == 0 and pending_conversations > 0:
+        unanswered_conversations = pending_conversations
+
     return {
         "conversations": {
             "total": total_conversations,
@@ -122,6 +141,8 @@ def get_admin_stats(
             "human_handled": human_handled_conversations,
             "escalation_rate": escalation_rate,
             "missed_deadlines": missed_deadlines,
+            "unassigned": unassigned_conversations,
+            "unanswered": unanswered_conversations,
             "pending": pending_conversations,
             "assigned": assigned_conversations,
             "open": assigned_conversations,

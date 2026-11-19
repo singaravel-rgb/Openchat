@@ -118,8 +118,10 @@ export default function AdminDashboardPage() {
   const busyAgents = stats?.agents.busy || 0;
   const offlineAgents = Math.max(0, totalAgents - availableAgents - busyAgents);
 
-  const humanHandled = (stats?.conversations.assigned || 0) + (stats?.conversations.open || 0);
-  const resolvedTotal = (stats?.conversations.ai_resolved || 0) + (stats?.conversations.today || 0);
+  const humanHandled = stats?.conversations.human_handled ?? ((stats?.conversations.assigned || 0) + (stats?.conversations.open || 0));
+  const resolvedTotal = stats?.conversations.resolved ?? ((stats?.conversations.ai_resolved || 0) + (stats?.conversations.today || 0));
+  const unassignedTotal = stats?.conversations.unassigned ?? stats?.conversations.pending ?? 0;
+  const unansweredTotal = stats?.conversations.unanswered ?? stats?.conversations.waiting_on_customer ?? 0;
 
   return (
     <div className="space-y-6">
@@ -128,7 +130,7 @@ export default function AdminDashboardPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Operations Dashboard</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Real-time oversight of customer conversations, AI automation, and team workload
+            Real-time oversight of customer conversations, AI routing, and support team capacity
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -174,10 +176,10 @@ export default function AdminDashboardPage() {
       {widgets.conv_overview && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <span>📊</span> Section 1 — Conversation Overview
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              Conversation Overview
             </h2>
-            <Link href="/admin/conversations" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+            <Link href="/admin/conversations" className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium">
               Open Workspace →
             </Link>
           </div>
@@ -185,85 +187,44 @@ export default function AdminDashboardPage() {
             <Link href="/admin/conversations" className="block group">
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Total Conversations</p>
-                      <p className="text-2xl font-bold text-slate-900 dark:text-white">{stats?.conversations.total || 0}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <svg className="w-4.5 h-4.5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                      </svg>
-                    </div>
-                  </div>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Conversations</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{stats?.conversations.total || 0}</p>
                 </CardContent>
               </Card>
             </Link>
 
             <Link href="/admin/conversations" className="block group">
-              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-purple-200 dark:border-purple-900/40">
+              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">AI Handling</p>
-                      <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats?.conversations.ai_handling || 0}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                      <span className="text-base">🤖</span>
-                    </div>
-                  </div>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">AI Handling</p>
+                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{stats?.conversations.ai_handling || 0}</p>
                 </CardContent>
               </Card>
             </Link>
 
             <Link href="/admin/conversations" className="block group">
-              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-blue-200 dark:border-blue-900/40">
+              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Human Handling</p>
-                      <p className="text-2xl font-bold text-blue-600">{humanHandled}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <span className="text-base">👤</span>
-                    </div>
-                  </div>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Human Handling</p>
+                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{humanHandled}</p>
                 </CardContent>
               </Card>
             </Link>
 
             <Link href="/admin/conversations?status=pending" className="block group">
-              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-amber-200 dark:border-amber-900/40">
+              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Pending</p>
-                      <p className="text-2xl font-bold text-amber-600">{stats?.conversations.pending || 0}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                      <svg className="w-4.5 h-4.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                  </div>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pending</p>
+                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{stats?.conversations.pending || 0}</p>
                 </CardContent>
               </Card>
             </Link>
 
             <Link href="/admin/conversations?status=resolved" className="block group">
-              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-emerald-200 dark:border-emerald-900/40">
+              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Resolved</p>
-                      <p className="text-2xl font-bold text-emerald-600">{resolvedTotal}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                      <svg className="w-4.5 h-4.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                  </div>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Resolved</p>
+                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{resolvedTotal}</p>
                 </CardContent>
               </Card>
             </Link>
@@ -271,58 +232,26 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* SECTION 2: Agent Overview */}
+      {/* SECTION 2: Team Status */}
       {widgets.agent_overview && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <span>👥</span> Section 2 — Agent Overview
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              Team Status
             </h2>
-            <Link href="/admin/agents" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
-              Manage Agents & Capacity →
+            <Link href="/admin/agents" className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium">
+              Manage Team →
             </Link>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Card>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Card className="border-slate-200 dark:border-slate-800">
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Total Agents</p>
-                    <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalAgents}</p>
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Available Agents</p>
+                    <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{availableAgents}</p>
                   </div>
-                  <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                    <svg className="w-4.5 h-4.5 text-slate-600 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                    </svg>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-emerald-200 dark:border-emerald-900/40">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Available</p>
-                    <p className="text-2xl font-bold text-emerald-600">{availableAgents}</p>
-                  </div>
-                  <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                    <span className="text-base">🟢</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-amber-200 dark:border-amber-900/40">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Busy / At Capacity</p>
-                    <p className="text-2xl font-bold text-amber-600">{busyAgents}</p>
-                  </div>
-                  <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                    <span className="text-base">🟡</span>
-                  </div>
+                  <span className="w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-emerald-100 dark:ring-emerald-950"></span>
                 </div>
               </CardContent>
             </Card>
@@ -331,12 +260,22 @@ export default function AdminDashboardPage() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Offline</p>
-                    <p className="text-2xl font-bold text-slate-600 dark:text-slate-400">{offlineAgents}</p>
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Busy Agents</p>
+                    <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{busyAgents}</p>
                   </div>
-                  <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                    <span className="text-base">⚪</span>
+                  <span className="w-3 h-3 rounded-full bg-amber-500 ring-4 ring-amber-100 dark:ring-amber-950"></span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-slate-200 dark:border-slate-800">
+              <CardContent className="p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Offline Agents</p>
+                    <p className="text-2xl font-bold text-slate-500 dark:text-slate-400 mt-1">{offlineAgents}</p>
                   </div>
+                  <span className="w-3 h-3 rounded-full bg-slate-400 ring-4 ring-slate-100 dark:ring-slate-800"></span>
                 </div>
               </CardContent>
             </Card>
@@ -344,79 +283,41 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* SECTION 3: Attention Required */}
+      {/* SECTION 3: Needs Attention */}
       {widgets.attention_required && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
-              <span>🚨</span> Section 3 — Attention Required
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-rose-700 dark:text-rose-400">
+              Needs Attention
             </h2>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-3">
             <Link href="/admin/conversations?status=pending" className="block group">
-              <Card className="hover:shadow-md transition-shadow border-amber-200 dark:border-amber-900/40 h-full">
+              <Card className="hover:shadow-md transition-shadow border-slate-200 dark:border-slate-800 h-full">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Unassigned / Pending</p>
-                      <p className="text-2xl font-bold text-amber-600">{stats?.conversations.pending || 0}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                      <span className="text-base">⏳</span>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">Awaiting agent pick or auto-assignment</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Unassigned Conversations</p>
+                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{unassignedTotal}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Awaiting triage or agent assignment</p>
                 </CardContent>
               </Card>
             </Link>
 
             <Link href="/admin/conversations?status=waiting_on_customer" className="block group">
-              <Card className="hover:shadow-md transition-shadow border-purple-200 dark:border-purple-900/40 h-full">
+              <Card className="hover:shadow-md transition-shadow border-slate-200 dark:border-slate-800 h-full">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Waiting on Customer</p>
-                      <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats?.conversations.waiting_on_customer || 0}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                      <span className="text-base">💬</span>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">Awaiting customer response</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Unanswered Conversations</p>
+                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{unansweredTotal}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Conversations requiring next response</p>
                 </CardContent>
               </Card>
             </Link>
 
             <Link href="/admin/conversations" className="block group">
-              <Card className="hover:shadow-md transition-shadow border-rose-200 dark:border-rose-900/40 h-full">
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Missed Deadlines</p>
-                      <p className="text-2xl font-bold text-rose-600">{stats?.conversations.missed_deadlines || 0}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
-                      <span className="text-base">⚠️</span>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">SLA breach warnings or reassignment</p>
-                </CardContent>
-              </Card>
-            </Link>
-
-            <Link href="/admin/conversations?status=on_hold" className="block group">
               <Card className="hover:shadow-md transition-shadow border-slate-200 dark:border-slate-800 h-full">
                 <CardContent className="p-5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">On Hold / Awaiting Reassign</p>
-                      <p className="text-2xl font-bold text-slate-700 dark:text-slate-300">{stats?.conversations.on_hold || 0}</p>
-                    </div>
-                    <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                      <span className="text-base">⏸️</span>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">Paused or released back to triage</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Missed Response Deadlines</p>
+                  <p className="text-2xl font-bold text-rose-600 dark:text-rose-400 mt-1">{stats?.conversations.missed_deadlines || 0}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">SLA target breached</p>
                 </CardContent>
               </Card>
             </Link>
@@ -428,14 +329,14 @@ export default function AdminDashboardPage() {
       {widgets.recent_activity && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <span>🕒</span> Section 4 — Recent Activity & Conversations
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              Recent Activity
             </h2>
-            <Link href="/admin/conversations" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+            <Link href="/admin/conversations" className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium">
               View All Conversations →
             </Link>
           </div>
-          <Card>
+          <Card className="border-slate-200 dark:border-slate-800">
             <CardContent className="p-0">
               {recentConversations.length === 0 ? (
                 <div className="p-6 text-center text-sm text-slate-500 dark:text-slate-400">
@@ -481,59 +382,6 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
       )}
-
-      {/* Quick Navigation Footer */}
-      <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Link href="/admin/conversations" className="block">
-            <Card className="hover:shadow-sm transition-shadow">
-              <CardContent className="p-3.5 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-sm">💬</div>
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-900 dark:text-white">Workspace</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">All conversations triage</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/admin/agents" className="block">
-            <Card className="hover:shadow-sm transition-shadow">
-              <CardContent className="p-3.5 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-sm">👥</div>
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-900 dark:text-white">Agents</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Manage support agents</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/admin/bot-flows" className="block">
-            <Card className="hover:shadow-sm transition-shadow">
-              <CardContent className="p-3.5 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-sm">🤖</div>
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-900 dark:text-white">Bot Flows</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Interactive bot menu</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/admin/settings" className="block">
-            <Card className="hover:shadow-sm transition-shadow">
-              <CardContent className="p-3.5 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">⚙️</div>
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-900 dark:text-white">Settings</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">SLA & timers</p>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
-      </div>
 
       {/* Customize Widgets Modal */}
       {showCustomizeModal && (

@@ -1042,6 +1042,9 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         if (selectedOtherAgentId !== 'all' && c.assigned_agent_id !== Number(selectedOtherAgentId)) return false;
       }
 
+      if (adminFilters.status && c.status !== adminFilters.status) return false;
+      if (adminFilters.agent_id && String(c.assigned_agent_id) !== String(adminFilters.agent_id)) return false;
+
       const agentObj = c.assigned_agent_id ? agents.find(a => a.id === c.assigned_agent_id) : null;
       const agentName = c.assigned_agent_name || (agentObj ? agentObj.full_name : '');
       const matchesSearch =
@@ -1072,7 +1075,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       return timeOf(b) - timeOf(a);
     });
     return sorted;
-  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy, queueFilter, primaryFilter, selectedOtherAgentId, userId, agents]);
+  }, [conversations, searchTerm, adminFilters.q, adminFilters.status, adminFilters.agent_id, userRole, sortBy, queueFilter, primaryFilter, selectedOtherAgentId, userId, agents]);
 
   // Layout dimensions
   const rightWidth = rightPanelOpen ? 330 : 56;
@@ -1118,202 +1121,154 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
             </div>
           </div>
 
-          {/* 4 Clean Primary Filters: All, AI, Me, Agent */}
-          <div className="mt-2.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-lg">
-            <div className="grid grid-cols-4 gap-1">
-              <button
-                type="button"
-                id="filter-tab-all"
-                onClick={() => setPrimaryFilter('all')}
-                className={`py-1 px-1 text-xs font-medium rounded transition-all text-center flex items-center justify-center gap-1 ${
-                  primaryFilter === 'all'
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-semibold'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <span>All</span>
-                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'all' ? 'bg-slate-200 dark:bg-slate-600 text-slate-800 dark:text-white font-bold' : 'bg-slate-200/60 dark:bg-slate-700 text-slate-600 dark:text-slate-400'}`}>{totalCount}</span>
-              </button>
-              <button
-                type="button"
-                id="filter-tab-ai"
-                onClick={() => setPrimaryFilter('ai')}
-                className={`py-1 px-1 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
-                  primaryFilter === 'ai'
-                    ? 'bg-purple-600 text-white shadow-xs font-semibold'
-                    : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40'
-                }`}
-              >
-                <span>🤖 AI</span>
-                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'ai' ? 'bg-purple-700 text-white font-bold' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300'}`}>{aiCount}</span>
-              </button>
-              <button
-                type="button"
-                id="filter-tab-me"
-                onClick={() => setPrimaryFilter('me')}
-                className={`py-1 px-1 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
-                  primaryFilter === 'me'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40'
-                }`}
-              >
-                <span>👤 Me</span>
-                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'me' ? 'bg-blue-700 text-white font-bold' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300'}`}>{meCount}</span>
-              </button>
-              <button
-                type="button"
-                id="filter-tab-agent"
-                onClick={() => setPrimaryFilter('agent')}
-                className={`py-1 px-1 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
-                  primaryFilter === 'agent'
-                    ? 'bg-indigo-600 text-white shadow-xs font-semibold'
-                    : 'text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
-                }`}
-              >
-                <span>👥 Agent</span>
-                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'agent' ? 'bg-indigo-700 text-white font-bold' : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300'}`}>{otherAgentCount}</span>
-              </button>
+          {/* Freshdesk-style View Dropdown */}
+          <div className="mt-2.5">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">View</span>
+              <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                {filteredConversations.length} of {totalCount}
+              </span>
             </div>
-
-            {primaryFilter === 'agent' && (
-              <div className="mt-1.5 pt-1.5 border-t border-slate-200/80 dark:border-slate-700/80">
-                <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Select Agent:</label>
-                <select
-                  value={selectedOtherAgentId}
-                  onChange={(e) => setSelectedOtherAgentId(e.target.value)}
-                  className="w-full text-xs py-1 px-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="all">All Other Agents ({otherAgentCount})</option>
-                  {agents.filter(a => a.id !== userId).map(a => {
-                    const count = conversations.filter(c => c.assigned_agent_id === a.id).length;
-                    return (
-                      <option key={a.id} value={String(a.id)}>
-                        {a.full_name} ({count} active)
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            )}
+            <select
+              id="conversation-view-dropdown"
+              value={primaryFilter}
+              onChange={(e) => {
+                const val = e.target.value as 'all' | 'ai' | 'me' | 'agent';
+                setPrimaryFilter(val);
+                if (val !== 'agent') {
+                  setSelectedOtherAgentId('all');
+                }
+              }}
+              className="w-full text-xs font-semibold py-1.5 px-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="all">All Conversations ({totalCount})</option>
+              <option value="ai">AI Handling ({aiCount})</option>
+              <option value="me">Assigned to Me ({meCount})</option>
+              <option value="agent">Assigned to Other Agents ({otherAgentCount})</option>
+            </select>
           </div>
 
-          <div className="mt-3 space-y-2">
+          {/* Searchable Agent Selector when "Assigned to Other Agents" is selected */}
+          {primaryFilter === 'agent' && (
+            <div className="mt-2 pt-2 border-t border-slate-200/80 dark:border-slate-800">
+              <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Other Agent:</label>
+              <select
+                id="other-agent-selector"
+                value={selectedOtherAgentId}
+                onChange={(e) => setSelectedOtherAgentId(e.target.value)}
+                className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="all">All Other Agents ({otherAgentCount})</option>
+                {agents.filter(a => a.id !== userId).map(a => {
+                  const count = conversations.filter(c => c.assigned_agent_id === a.id).length;
+                  return (
+                    <option key={a.id} value={String(a.id)}>
+                      {a.is_available ? '🟢' : '⚪'} {a.full_name} ({count} active)
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+
+          {/* Compact Filter Toolbar */}
+          <div className="mt-2.5 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <select
+                  id="filter-status-dropdown"
+                  value={adminFilters.status}
+                  onChange={(e) => setAdminFilters(prev => ({ ...prev, status: e.target.value }))}
+                  className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  aria-label="Filter by status"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="open">Open</option>
+                  <option value="pending">Pending</option>
+                  <option value="waiting_on_customer">Waiting on Customer</option>
+                  <option value="on_hold">On Hold</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="ai_handling">AI Handling</option>
+                </select>
+              </div>
+
               {userRole === 'admin' ? (
-                // Admin advanced filters
-                <div className="space-y-2">
-                  <div className="grid gap-2 grid-cols-2">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Status</label>
-                      <select
-                        value={adminFilters.status}
-                        onChange={(e) => setAdminFilters(prev => ({ ...prev, status: e.target.value }))}
-                        className="w-full text-sm px-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="">All Statuses</option>
-                        <option value="open">Open</option>
-                        <option value="pending">Pending</option>
-                        <option value="waiting_on_customer">Waiting on Customer</option>
-                        <option value="on_hold">On Hold</option>
-                        <option value="resolved">Resolved</option>
-                        <option value="ai_handling">AI Handling</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Agent ID</label>
-                      <Input
-                        value={adminFilters.agent_id}
-                        onChange={(e) => setAdminFilters(prev => ({ ...prev, agent_id: e.target.value }))}
-                        placeholder="Agent ID"
-                        className="text-sm px-2 py-1.5"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Customer ID</label>
-                      <Input
-                        value={adminFilters.customer_id}
-                        onChange={(e) => setAdminFilters(prev => ({ ...prev, customer_id: e.target.value }))}
-                        placeholder="Customer ID"
-                        className="text-sm px-2 py-1.5"
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <Button variant="outline" size="sm" onClick={() => setAdminFilters({ status: '', agent_id: '', customer_id: '', q: '' })} className="w-full">
-                        Clear
-                      </Button>
-                    </div>
-                  </div>
-                  <Input
-                    placeholder="Search conversations..."
-                    value={adminFilters.q}
-                    onChange={(e) => setAdminFilters(prev => ({ ...prev, q: e.target.value }))}
-                    className="text-sm px-3 py-2 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    aria-label="Search conversations"
-                  />
+                <div>
+                  <select
+                    id="filter-agent-dropdown"
+                    value={adminFilters.agent_id}
+                    onChange={(e) => setAdminFilters(prev => ({ ...prev, agent_id: e.target.value }))}
+                    className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    aria-label="Filter by agent"
+                  >
+                    <option value="">All Agents</option>
+                    {agents.map(a => {
+                      const count = conversations.filter(c => c.assigned_agent_id === a.id).length;
+                      return (
+                        <option key={a.id} value={String(a.id)}>
+                          {a.is_available ? '🟢' : '⚪'} {a.full_name} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
               ) : (
-                // Agent queue selector and search
-                <>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex-1">
-                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Assigned to me</div>
-                      <select
-                        value={queue}
-                        onChange={(e) => handleQueueChange(e.target.value as QueueValue)}
-                        className="w-full text-sm px-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        aria-label="Select queue"
-                      >
-                        {QUEUE_OPTIONS.map((q) => (
-                          <option key={q.value} value={q.value}>{q.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs text-slate-500 dark:text-slate-400">Sort</div>
-                      <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                        className="text-sm px-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        aria-label="Sort conversations"
-                      >
-                        <option value="newest">Newest</option>
-                        <option value="oldest">Oldest</option>
-                        <option value="subject">Subject</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1">
-                    {(['all', 'pending', 'waiting', 'on_hold', 'unassigned'] as const).map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => setQueueFilter(opt as any)}
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                          queueFilter === opt
-                            ? 'bg-blue-600 text-white border-blue-600'
-                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                        }`}
-                        aria-pressed={queueFilter === opt}
-                      >
-                        {opt === 'waiting' ? 'Waiting' : opt === 'on_hold' ? 'On Hold' : opt.charAt(0).toUpperCase() + opt.slice(1)}
-                      </button>
-                    ))}
-                    <div className="ml-auto flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-                      <span>Filter</span>
-                      <Badge variant="default" className="text-[10px]">
-                        {queueFilter === 'all' ? 'All' : queueFilter === 'waiting' ? 'Waiting' : queueFilter === 'on_hold' ? 'On Hold' : queueFilter}
-                      </Badge>
-                    </div>
-                  </div>
-                  <Input
-                    placeholder="Search conversations..."
-                    value={searchTerm}
-                    onChange={(e) => handleSearch(e.target.value)}
-                    className="text-sm px-3 py-2 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    aria-label="Search conversations"
-                  />
-                </>
+                <div>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                    className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    aria-label="Sort conversations"
+                  >
+                    <option value="newest">Sort: Newest</option>
+                    <option value="oldest">Sort: Oldest</option>
+                    <option value="subject">Sort: Subject</option>
+                  </select>
+                </div>
               )}
             </div>
+
+            {/* Customer Search & Reset Button */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Search customer, email, Chat ID..."
+                  value={userRole === 'admin' ? adminFilters.q : searchTerm}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (userRole === 'admin') {
+                      setAdminFilters(prev => ({ ...prev, q: val }));
+                    } else {
+                      handleSearch(val);
+                    }
+                  }}
+                  className="w-full text-xs pl-7 pr-2 py-1.5 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  aria-label="Search conversations"
+                />
+                <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+
+              {(adminFilters.status || adminFilters.agent_id || adminFilters.q || searchTerm || primaryFilter !== 'all' || selectedOtherAgentId !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrimaryFilter('all');
+                    setSelectedOtherAgentId('all');
+                    setAdminFilters({ status: '', agent_id: '', customer_id: '', q: '' });
+                    setSearchTerm('');
+                    setQueueFilter('all');
+                  }}
+                  className="text-xs px-2.5 py-1.5 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md text-slate-600 dark:text-slate-300 transition-colors whitespace-nowrap flex-shrink-0 font-medium"
+                  title="Clear all filters"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Conversation List */}
@@ -1560,7 +1515,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     </svg>
                     <span>
                       {selectedConversation.assigned_agent_id ? (
-                        <>Agent: <strong className="font-semibold text-blue-600 dark:text-blue-400">{agents.find(a => a.id === selectedConversation.assigned_agent_id)?.full_name || `Agent #${selectedConversation.assigned_agent_id}`}</strong></>
+                        <>Agent: <strong className="font-semibold text-blue-600 dark:text-blue-400">{selectedConversation.assigned_agent_name || agents.find(a => a.id === selectedConversation.assigned_agent_id)?.full_name || 'Assigned Agent'}</strong></>
                       ) : (
                         'Assign'
                       )}
@@ -2611,7 +2566,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                        {(assignmentHistory || []).slice(-5).map((entry, index) => {
                          const e = entry as Record<string, unknown>;
                          const toId = e.to_agent_id ?? e.agent_id;
-                         const toName = e.to_agent_name ?? e.agent_name ?? (toId ? agents.find(a => a.id === Number(toId))?.full_name : null) ?? (toId ? `Agent #${toId}` : 'agent');
+                         const toName = e.to_agent_name ?? e.agent_name ?? (toId ? agents.find(a => a.id === Number(toId))?.full_name : null) ?? 'Assigned Agent';
                          return (
                            <div key={`assignment-${index}`} className="flex items-start gap-2 text-slate-500 dark:text-slate-400">
                              <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-500" />

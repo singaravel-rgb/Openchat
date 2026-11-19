@@ -208,6 +208,8 @@ export interface AdminStats {
     human_handled?: number;
     escalation_rate?: number;
     missed_deadlines?: number;
+    unassigned?: number;
+    unanswered?: number;
     pending: number;
     assigned: number;
     open?: number;

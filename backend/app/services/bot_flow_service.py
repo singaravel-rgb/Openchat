@@ -26,16 +26,22 @@ DEFAULT_ISSUES = [
         "sort_order": 3,
     },
     {
-        "title": "🛠️ Technical Support",
-        "description": "App issues, website problems, login difficulties",
-        "start_step_key": "tech_help",
+        "title": "ℹ️ Product Information",
+        "description": "Features, pricing, subscriptions, and integrations",
+        "start_step_key": "product_help",
         "sort_order": 4,
     },
     {
-        "title": "👤 Account Assistance",
-        "description": "Profile details, password reset, security settings",
-        "start_step_key": "account_help",
+        "title": "🛠️ Technical Support",
+        "description": "App issues, website problems, login difficulties",
+        "start_step_key": "tech_help",
         "sort_order": 5,
+    },
+    {
+        "title": "❓ Other Questions",
+        "description": "General questions, feedback, and custom assistance",
+        "start_step_key": "other_help",
+        "sort_order": 6,
     },
 ]
 
@@ -153,11 +159,29 @@ DEFAULT_STEPS = [
     {
         "step_key": "tech_help",
         "step_type": "message",
-        "message_text": "For Technical Support: Please describe the issue or error message you are seeing, and our support team or AI will diagnose it immediately.",
+        "message_text": "For Technical Support: Please describe the issue or error message you are seeing, and our support team will assist you immediately.",
         "options": None,
         "next_step_key": None,
         "is_terminal": True,
         "sort_order": 12,
+    },
+    {
+        "step_key": "product_help",
+        "step_type": "message",
+        "message_text": "For Product Information: OpenChat provides AI-first customer support, live chat widget, and team collaboration. Let us know what features or details you'd like to explore.",
+        "options": None,
+        "next_step_key": None,
+        "is_terminal": True,
+        "sort_order": 13,
+    },
+    {
+        "step_key": "other_help",
+        "step_type": "message",
+        "message_text": "How can we assist you today? Please send your question and our support team will help you right away.",
+        "options": None,
+        "next_step_key": None,
+        "is_terminal": True,
+        "sort_order": 14,
     },
     {
         "step_key": "account_help",
@@ -166,7 +190,7 @@ DEFAULT_STEPS = [
         "options": None,
         "next_step_key": None,
         "is_terminal": True,
-        "sort_order": 13,
+        "sort_order": 15,
     },
 ]
 
@@ -177,6 +201,37 @@ def seed_default_bot_flow(db: Session) -> BotFlow:
     if not flow:
         flow = db.query(BotFlow).filter(BotFlow.status == "published").first()
     if flow:
+        existing_issues = {i.title for i in db.query(BotFlowIssue).filter(BotFlowIssue.flow_id == flow.id).all()}
+        added = False
+        for issue_data in DEFAULT_ISSUES:
+            if issue_data["title"] not in existing_issues:
+                issue = BotFlowIssue(
+                    flow_id=flow.id,
+                    title=issue_data["title"],
+                    description=issue_data["description"],
+                    start_step_key=issue_data["start_step_key"],
+                    sort_order=issue_data["sort_order"],
+                    is_active=True,
+                )
+                db.add(issue)
+                added = True
+        existing_step_keys = {s.step_key for s in db.query(BotFlowStep).filter(BotFlowStep.flow_id == flow.id).all()}
+        for step_data in DEFAULT_STEPS:
+            if step_data["step_key"] not in existing_step_keys:
+                step = BotFlowStep(
+                    flow_id=flow.id,
+                    step_key=step_data["step_key"],
+                    step_type=step_data["step_type"],
+                    message_text=step_data["message_text"],
+                    options=step_data["options"],
+                    next_step_key=step_data["next_step_key"],
+                    is_terminal=step_data["is_terminal"],
+                    sort_order=step_data["sort_order"],
+                )
+                db.add(step)
+                added = True
+        if added:
+            db.commit()
         return flow
 
     admin = db.query(User).filter(User.role.in_(["admin", "super_admin"])).first()

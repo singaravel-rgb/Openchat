@@ -24,7 +24,7 @@
     logo_url: null,
     primary_color: "#2563eb",
     launcher_position: "bottom-right",
-    welcome_message: "Hi! How can we help you today?",
+    welcome_message: "Hello! Welcome to OpenChat Support. How can we help you today?",
     greeting_text: "Start a conversation with our team.",
     widget_visibility: true,
     widget_availability: true,
@@ -525,8 +525,9 @@
             '<button type="button" class="ocw-topic-btn" data-topic="📦 Order or Booking" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>📦 Order or Booking</span><span style="color:#94a3b8">→</span></button>' +
             '<button type="button" class="ocw-topic-btn" data-topic="💳 Payment and Billing" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>💳 Payment and Billing</span><span style="color:#94a3b8">→</span></button>' +
             '<button type="button" class="ocw-topic-btn" data-topic="🔄 Refund or Cancellation" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>🔄 Refund or Cancellation</span><span style="color:#94a3b8">→</span></button>' +
+            '<button type="button" class="ocw-topic-btn" data-topic="ℹ️ Product Information" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>ℹ️ Product Information</span><span style="color:#94a3b8">→</span></button>' +
             '<button type="button" class="ocw-topic-btn" data-topic="🛠️ Technical Support" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>🛠️ Technical Support</span><span style="color:#94a3b8">→</span></button>' +
-            '<button type="button" class="ocw-topic-btn" data-topic="👤 Account Assistance" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>👤 Account Assistance</span><span style="color:#94a3b8">→</span></button>' +
+            '<button type="button" class="ocw-topic-btn" data-topic="❓ Other Questions" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>❓ Other Questions</span><span style="color:#94a3b8">→</span></button>' +
             '</div>';
           panel += '<div style="margin:14px 0 8px;font-size:12px;color:#64748b;font-weight:600">Your conversations</div>';
           if (state.conversations && state.conversations.length) {
