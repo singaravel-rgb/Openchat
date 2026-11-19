@@ -11,6 +11,10 @@ on:
         options:
           - plan
           - apply
+      plan_run_id:
+        description: 'Approved Plan Workflow Run ID (Required for apply)'
+        required: false
+        default: ''
   push:
     branches:
       - 'release/v1.0.0-aws-production'
@@ -21,6 +25,7 @@ on:
 permissions:
   id-token: write   # Required for AWS OIDC authentication
   contents: read    # Required to checkout the repository
+  actions: read     # Required to download plan artifacts across workflow runs
 
 jobs:
   terraform:
@@ -61,7 +66,10 @@ jobs:
         working-directory: infra/terraform-test-ec2
         run: terraform validate
 
-      - name: Terraform Plan (Reviewable Artifact - No Auto-Apply)
+      # ------------------------------------------------------------------------
+      # PLAN PATH (Default on push or manual plan dispatch)
+      # ------------------------------------------------------------------------
+      - name: Terraform Plan (Reviewable Saved Plan - No Auto-Apply)
         if: ${{ github.event.inputs.action != 'apply' }}
         working-directory: infra/terraform-test-ec2
         run: |
@@ -70,7 +78,7 @@ jobs:
           terraform show -no-color staging.tfplan > staging-plan-summary.txt
           cat staging-plan-summary.txt
 
-      - name: Preserve Reviewable Plan Artifact
+      - name: Preserve Reviewable Saved Plan Artifact
         if: ${{ github.event.inputs.action != 'apply' }}
         uses: actions/upload-artifact@v4
         with:
@@ -80,15 +88,41 @@ jobs:
             infra/terraform-test-ec2/staging.tfplan
           retention-days: 7
 
-      - name: Terraform Apply (Explicit Approval Execution)
+      # ------------------------------------------------------------------------
+      # APPLY PATH (Explicit approval execution using exact reviewed saved plan)
+      # ------------------------------------------------------------------------
+      - name: Validate Plan Run ID for Apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        run: |
+          if [ -z "${{ github.event.inputs.plan_run_id }}" ]; then
+            echo "ERROR: plan_run_id is required when action is apply."
+            exit 1
+          fi
+          echo "Target approved plan run ID: ${{ github.event.inputs.plan_run_id }}"
+
+      - name: Download Approved Saved Plan Artifact
+        if: ${{ github.event.inputs.action == 'apply' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: openchat-staging-ec2-tfplan
+          path: infra/terraform-test-ec2
+          run-id: ${{ github.event.inputs.plan_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Inspect & Verify Downloaded Plan File
         if: ${{ github.event.inputs.action == 'apply' }}
         working-directory: infra/terraform-test-ec2
         run: |
-          echo "=== Generating & Validating Plan under openchat-staging-terraform-deployer ==="
-          terraform plan -no-color -out=staging.tfplan
-          terraform show -no-color staging.tfplan > staging-plan-summary.txt
+          echo "=== Verifying downloaded plan file from Run ${{ github.event.inputs.plan_run_id }} ==="
+          test -f staging.tfplan || (echo "ERROR: staging.tfplan not found in downloaded artifact!" && exit 1)
+          test -f staging-plan-summary.txt || (echo "ERROR: staging-plan-summary.txt not found!" && exit 1)
+          echo "=== Verified Plan Summary ==="
           cat staging-plan-summary.txt
-          echo "=== Verifying Plan Exact Parity ==="
-          grep -q "Plan: 11 to add, 0 to change, 0 to destroy." staging-plan-summary.txt || (echo "ERROR: Plan changed! Expected 11 to add, 0 to change, 0 to destroy." && exit 1)
-          echo "=== Applying Approved Saved Plan ==="
+          grep -q "Plan: 11 to add, 0 to change, 0 to destroy." staging-plan-summary.txt || (echo "ERROR: Plan summary does not match 11 additions!" && exit 1)
+
+      - name: Terraform Apply (Exact Reviewed Saved Plan)
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: infra/terraform-test-ec2
+        run: |
+          echo "=== Applying Approved Saved Plan staging.tfplan from Run ${{ github.event.inputs.plan_run_id }} ==="
           terraform apply -no-color staging.tfplan

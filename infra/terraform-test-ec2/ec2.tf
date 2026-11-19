@@ -2,16 +2,14 @@
 # Single EC2 Test Host: Docker Compose, Nginx SSL, SSM Access, Encrypted EBS
 # ==============================================================================
 
-# Default VPC & Subnet Lookup
+# Default VPC & Target Subnet Lookup
 data "aws_vpc" "default" {
   default = true
 }
 
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
+data "aws_subnet" "test_host" {
+  id     = "subnet-0e79e06c2853d021b"
+  vpc_id = data.aws_vpc.default.id
 }
 
 # Ubuntu 24.04 LTS AMI Lookup (Architecture dynamically matches instance_type)
@@ -65,7 +63,7 @@ data "aws_iam_instance_profile" "test_host" {
 resource "aws_instance" "test_host" {
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.instance_type
-  subnet_id                   = tolist(data.aws_subnets.default.ids)[0]
+  subnet_id                   = data.aws_subnet.test_host.id
   associate_public_ip_address = true
   iam_instance_profile        = data.aws_iam_instance_profile.test_host.name
   vpc_security_group_ids = [
