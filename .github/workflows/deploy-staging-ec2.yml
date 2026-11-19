@@ -75,12 +75,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openchat-staging-ec2-tfplan
-          path: infra/terraform-test-ec2/staging-plan-summary.txt
+          path: |
+            infra/terraform-test-ec2/staging-plan-summary.txt
+            infra/terraform-test-ec2/staging.tfplan
           retention-days: 7
 
       - name: Terraform Apply (Explicit Approval Execution)
         if: ${{ github.event.inputs.action == 'apply' }}
         working-directory: infra/terraform-test-ec2
         run: |
-          echo "=== Executing Terraform Apply under openchat-staging-terraform-deployer ==="
-          terraform apply -auto-approve -no-color
+          echo "=== Generating & Validating Plan under openchat-staging-terraform-deployer ==="
+          terraform plan -no-color -out=staging.tfplan
+          terraform show -no-color staging.tfplan > staging-plan-summary.txt
+          cat staging-plan-summary.txt
+          echo "=== Verifying Plan Exact Parity ==="
+          grep -q "Plan: 11 to add, 0 to change, 0 to destroy." staging-plan-summary.txt || (echo "ERROR: Plan changed! Expected 11 to add, 0 to change, 0 to destroy." && exit 1)
+          echo "=== Applying Approved Saved Plan ==="
+          terraform apply -no-color staging.tfplan
