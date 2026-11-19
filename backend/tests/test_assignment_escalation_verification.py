@@ -47,7 +47,25 @@ def test_ai_escalation_assigns_human_agent_without_merging_or_linking():
         if not customer:
             customer = User(email="test_cust_esc@example.com", full_name="Escalation Customer", role="customer")
             db.add(customer)
-            db.commit()
+
+        # Ensure at least one available human agent with approved profile exists
+        agent = db.query(User).filter(User.role == "agent").first()
+        if not agent:
+            agent = User(email="test_esc_agent@example.com", full_name="Sarah Jenkins", role="agent", is_active=True)
+            db.add(agent)
+            db.flush()
+            profile = AgentProfile(user_id=agent.id, is_available=True, is_approved=True, max_conversations=5, active_conversations=0)
+            db.add(profile)
+        else:
+            profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
+            if not profile:
+                profile = AgentProfile(user_id=agent.id, is_available=True, is_approved=True, max_conversations=5, active_conversations=0)
+                db.add(profile)
+            else:
+                profile.is_available = True
+                profile.is_approved = True
+
+        db.commit()
 
         conv = Conversation(
             customer_id=customer.id,

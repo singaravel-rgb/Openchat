@@ -38,6 +38,21 @@ def reset_rate_limits():
 def _login(email, password="password123"):
     if email == "singaravel@vananam.com":
         password = "SuperAdminPassword2026!"
+        db = SessionLocal()
+        try:
+            u = db.query(User).filter(User.email == email).first()
+            if not u:
+                u = User(
+                    email=email,
+                    full_name="Super Admin",
+                    role="super_admin",
+                    is_active=True,
+                    password_hash=hash_password(password),
+                )
+                db.add(u)
+                db.commit()
+        finally:
+            db.close()
     r = client.post("/api/v1/auth/login", data={"username": email, "password": password})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}

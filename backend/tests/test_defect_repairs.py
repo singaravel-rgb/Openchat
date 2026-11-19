@@ -14,10 +14,31 @@ from app.core.enums import ConversationStatus
 from app.models.agent_profile import AgentProfile
 from app.models.conversation import Conversation
 from app.models.user import User
+from app.core.security import hash_password
 from app.services.assignment_service import reassign_conversation
 from app.services.conversation_service import assign_conversation, take_conversation, merge_conversations
 
 client = TestClient(app)
+
+
+def _ensure_defect_test_users(db):
+    admin = db.query(User).filter(User.role == "admin").first()
+    if not admin:
+        admin = User(email="defect_admin@example.com", full_name="Defect Admin", role="admin", is_active=True, password_hash=hash_password("password123"))
+        db.add(admin)
+    customer = db.query(User).filter(User.role == "customer").first()
+    if not customer:
+        customer = User(email="defect_cust@example.com", full_name="Defect Cust", role="customer", is_active=True, password_hash=hash_password("password123"))
+        db.add(customer)
+    agent = db.query(User).filter(User.role == "agent").first()
+    if not agent:
+        agent = User(email="defect_agent@example.com", full_name="Defect Agent", role="agent", is_active=True, password_hash=hash_password("password123"))
+        db.add(agent)
+    db.commit()
+    db.refresh(admin)
+    db.refresh(customer)
+    db.refresh(agent)
+    return admin, customer, agent
 
 
 def test_cannot_assign_to_offline_agent():
@@ -25,11 +46,7 @@ def test_cannot_assign_to_offline_agent():
     db = SessionLocal()
     try:
         # Create or fetch test users
-        admin = db.query(User).filter(User.role == "admin").first()
-        customer = db.query(User).filter(User.role == "customer").first()
-        agent = db.query(User).filter(User.role == "agent").first()
-
-        assert admin and customer and agent, "Seed data missing"
+        admin, customer, agent = _ensure_defect_test_users(db)
 
         # Set agent offline
         profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
@@ -84,9 +101,7 @@ def test_merge_preserves_internal_note():
     """Verify that merging conversations appends source global internal note to target."""
     db = SessionLocal()
     try:
-        admin = db.query(User).filter(User.role == "admin").first()
-        customer = db.query(User).filter(User.role == "customer").first()
-        assert admin and customer
+        admin, customer, _ = _ensure_defect_test_users(db)
 
         conv1 = Conversation(
             customer_id=customer.id,
