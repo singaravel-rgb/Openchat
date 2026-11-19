@@ -59,6 +59,12 @@ COMPLEX_PATTERNS = [
     r"\bbroken\b", r"\bcan't (access|login|sign in)\b", r"\bintegration\b", r"\bapi\b",
 ]
 
+GREETING_PATTERNS = [
+    r"^\s*(hi|hello|hey|good (morning|afternoon|evening)|howdy|greetings)[\s!.,?]*$",
+    r"^\s*(how are you|who are you|what can you do)[\s!.,?]*$",
+    r"^\s*hi there[\s!.,?]*$",
+]
+
 PRICING_RATES = {
     # Reference estimates per 1M tokens (input, output)
     "gemini:gemini-flash-lite-latest": (0.0375, 0.15),
@@ -288,6 +294,11 @@ def detect_sensitive_or_restricted(text: str, rules: dict[str, Any]) -> tuple[bo
 def detect_complexity(text: str) -> bool:
     t = (text or "").lower()
     return any(re.search(p, t) for p in COMPLEX_PATTERNS)
+
+
+def detect_greeting(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return any(re.search(p, t) for p in GREETING_PATTERNS)
 
 
 def build_handoff_summary(conversation: Conversation, messages: list[Message], escalation_reason: str | None, sources: list[dict[str, Any]], max_messages: int = 8) -> str:
@@ -662,7 +673,7 @@ def enforce_action_claim_safety(text: str) -> str:
     return cleaned
 
 
-def _validate_output(text: str, runtime: RuntimeAIConfig, knowledge_hits: list[KnowledgeHit]) -> tuple[str, bool, str | None]:
+def _validate_output(text: str, runtime: RuntimeAIConfig, knowledge_hits: list[KnowledgeHit], is_greeting: bool = False) -> tuple[str, bool, str | None]:
     cleaned = _sanitize_user_text(text)
     if not cleaned:
         return "I don't have enough verified information to answer that right now. I can connect you with a human agent for help.", True, "abstain"
@@ -670,8 +681,8 @@ def _validate_output(text: str, runtime: RuntimeAIConfig, knowledge_hits: list[K
     # Enforce action-claim safety: never claim unconfirmed actions (refunds, cancellations, deletions) were completed
     cleaned = enforce_action_claim_safety(cleaned)
 
-    # prevent fabricated certainty / policy actions
-    if not knowledge_hits and not re.search(r"(clarify|more detail|human agent|support agent|don't have enough|not enough verified)", cleaned.lower()):
+    # prevent fabricated certainty / policy actions when not a greeting
+    if not is_greeting and not knowledge_hits and not re.search(r"(clarify|more detail|human agent|support agent|don't have enough|not enough verified)", cleaned.lower()):
         cleaned = (
             "I don't have enough verified information in the knowledge base to answer that confidently. "
             "Could you share more details, or would you like me to connect you with a human agent?"
@@ -842,7 +853,8 @@ async def process_ai_turn(
         confidence -= 0.15
     confidence = max(0.0, min(1.0, confidence))
 
-    validated, forced_abstain, abstain_decision = _validate_output(text, runtime, knowledge_hits)
+    is_greeting = detect_greeting(last_customer)
+    validated, forced_abstain, abstain_decision = _validate_output(text, runtime, knowledge_hits, is_greeting=is_greeting)
     decision = "answered"
     should_escalate = False
     reason = None
@@ -856,6 +868,9 @@ async def process_ai_turn(
         should_escalate = True
         decision = "escalate"
         reason = f"AI provider error: {error}"
+    elif is_greeting:
+        decision = "answered"
+        should_escalate = False
     elif forced_abstain:
         decision = abstain_decision or "abstain"
         if runtime.escalation_rules.get("escalate_on_uncertain", True) and confidence < runtime.confidence_threshold:
@@ -873,10 +888,12 @@ async def process_ai_turn(
             decision = "escalate"
     else:
         decision = "clarify"
-        if runtime.escalation_rules.get("escalate_on_uncertain", True) and confidence < runtime.confidence_threshold:
+        if customer_turns >= max_turns:
             should_escalate = True
-            reason = "Low-confidence answer for customer request"
+            reason = "Conversation exceeded maximum AI turns without confident resolution"
             decision = "escalate"
+        else:
+            should_escalate = False
 
     # turn limit safeguard
     if not should_escalate and customer_turns >= max_turns and decision in ("clarify", "abstain"):

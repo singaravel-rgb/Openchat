@@ -32,6 +32,10 @@ def assign_conversation_to_agent(db: Session, conversation: Conversation) -> boo
     Returns True if assigned, False if no agent available (conversation goes to pending).
     Caller controls transaction boundaries where possible.
     """
+    # Idempotency guard: prevent duplicate assignments if already actively assigned
+    if conversation.assigned_agent_id is not None and conversation.status == ConversationStatus.ASSIGNED:
+        return True
+
     available_agents = get_available_agents(db)
 
     if not available_agents:

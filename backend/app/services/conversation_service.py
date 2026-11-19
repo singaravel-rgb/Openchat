@@ -409,7 +409,7 @@ def add_message(
     message = Message(
         conversation_id=conversation.id,
         sender_id=sender.id,
-        sender_type=MessageSenderType.AGENT if sender.role in ("agent", "admin") else MessageSenderType.CUSTOMER,
+        sender_type=MessageSenderType.AGENT if sender.role in ("agent", "admin", "super_admin") else MessageSenderType.CUSTOMER,
         message_type=message_type,
         content=content,
         is_internal=is_internal,
@@ -543,7 +543,7 @@ def get_visible_messages(
     offset: int = 0
 ) -> List[Message]:
     """Get messages visible to the user (filter internal notes for customers)."""
-    include_internal = user.role in ("agent", "admin")
+    include_internal = user.role in ("agent", "admin", "super_admin")
     messages_q = db.query(Message).filter(Message.conversation_id == conversation_id)
     if not include_internal:
         messages_q = messages_q.filter(Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
@@ -672,16 +672,27 @@ async def process_customer_message(
                     "escalation_reason": result.escalation_reason,
                 }
                 if result.answer:
-                    ai_msg = Message(
-                        conversation_id=conversation.id,
-                        sender_id=None,
-                        sender_type=MessageSenderType.AI,
-                        message_type=MessageType.TEXT,
-                        content=result.answer,
-                        is_internal=False,
-                        ai_metadata=ai_metadata,
+                    # Idempotency check: prevent duplicate AI message for this turn
+                    duplicate_check = (
+                        db.query(Message)
+                        .filter(
+                            Message.conversation_id == conversation.id,
+                            Message.sender_type == MessageSenderType.AI,
+                            Message.created_at >= customer_msg.created_at,
+                        )
+                        .first()
                     )
-                    db.add(ai_msg)
+                    if not duplicate_check:
+                        ai_msg = Message(
+                            conversation_id=conversation.id,
+                            sender_id=None,
+                            sender_type=MessageSenderType.AI,
+                            message_type=MessageType.TEXT,
+                            content=result.answer,
+                            is_internal=False,
+                            ai_metadata=ai_metadata,
+                        )
+                        db.add(ai_msg)
 
                 if result.should_escalate:
                     conversation.status = ConversationStatus.PENDING
@@ -887,7 +898,7 @@ def merge_conversations(
     # Cross-customer validation
     is_cross_customer = source.customer_id != target.customer_id
     if is_cross_customer:
-        if actor.role != "admin":
+        if actor.role not in ("admin", "super_admin"):
             raise HTTPException(
                 status_code=403,
                 detail="Merging conversations belonging to different customers requires administrator privileges",

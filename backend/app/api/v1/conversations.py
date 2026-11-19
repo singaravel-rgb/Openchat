@@ -98,7 +98,7 @@ def get_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
     ensure_can_view(current_user, conversation)
 
-    include_internal = current_user.role in ("agent", "admin")
+    include_internal = current_user.role in ("agent", "admin", "super_admin")
     messages_q = db.query(Message).filter(Message.conversation_id == conversation_id)
     if not include_internal:
         messages_q = messages_q.filter(Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
@@ -278,7 +278,7 @@ def update_global_note_endpoint(
     current_user: User = Depends(get_current_user),
 ):
     """Update persistent Global Internal Note. Strictly forbidden for customers."""
-    if current_user.role not in ("agent", "admin"):
+    if current_user.role not in ("agent", "admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Forbidden: only agents and admins can access internal notes")
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conversation:
@@ -297,7 +297,7 @@ def edit_private_note(
     current_user: User = Depends(get_current_user),
 ):
     """Edit an internal private note. Permitted for the note author or admins."""
-    if current_user.role not in ("agent", "admin"):
+    if current_user.role not in ("agent", "admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Forbidden: only agents and admins can edit private notes")
 
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
@@ -312,7 +312,7 @@ def edit_private_note(
     if not message.is_internal:
         raise HTTPException(status_code=400, detail="Only private notes can be edited")
 
-    if current_user.role != "admin" and message.sender_id != current_user.id:
+    if current_user.role not in ("admin", "super_admin") and message.sender_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only edit your own private notes")
 
     now = datetime.now(timezone.utc)
@@ -343,7 +343,7 @@ def retract_message(
     current_user: User = Depends(get_current_user),
 ):
     """Undo / retract a sent agent message within 5 seconds."""
-    if current_user.role not in ("agent", "admin"):
+    if current_user.role not in ("agent", "admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Forbidden: only agents and admins can retract messages")
 
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
@@ -358,7 +358,7 @@ def retract_message(
     if message.is_internal:
         raise HTTPException(status_code=400, detail="Private notes cannot be retracted; use the edit functionality")
 
-    if current_user.role != "admin" and message.sender_id != current_user.id:
+    if current_user.role not in ("admin", "super_admin") and message.sender_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only undo/retract your own messages")
 
     if message.is_retracted:
