@@ -27,6 +27,17 @@ jobs:
     environment: staging
 
     steps:
+      - name: Validate Approved Branch Gate
+        run: |
+          ALLOWED_BRANCH="release/v1.0.0-aws-production"
+          CURRENT_BRANCH="${{ github.ref_name }}"
+          echo "Verifying trigger branch '$CURRENT_BRANCH' against approved branch '$ALLOWED_BRANCH'..."
+          if [ "$CURRENT_BRANCH" != "$ALLOWED_BRANCH" ]; then
+            echo "ERROR: Deployments are strictly restricted to '$ALLOWED_BRANCH'. Attempted branch: '$CURRENT_BRANCH'"
+            exit 1
+          fi
+          echo "Branch verification passed: $CURRENT_BRANCH"
+
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
