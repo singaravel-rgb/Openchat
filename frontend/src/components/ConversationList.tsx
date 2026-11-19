@@ -37,7 +37,7 @@ export function ConversationList({ conversations, emptyMessage = 'No conversatio
           <Card className="hover:shadow-md transition-shadow cursor-pointer">
             <CardContent className="p-4">
               <div className="flex items-start gap-3">
-                <Avatar name={conversation.customer_name} size="lg" />
+                <Avatar name={conversation.customer_name} size="lg" role="customer" className="flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">

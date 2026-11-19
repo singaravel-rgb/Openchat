@@ -150,7 +150,7 @@ export function ConversationDetailView({ conversation, onUpdate, mode }: Convers
         <CardContent className="p-4 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-3">
-              <Avatar name={String(conversation.customer_id)} size="lg" />
+              <Avatar name={conversation.customer_name || `Customer #${conversation.customer_id}`} size="lg" role="customer" />
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-lg font-bold text-blue-600 dark:text-blue-400">

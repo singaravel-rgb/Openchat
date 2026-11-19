@@ -1247,9 +1247,10 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   )}
                   <div className="flex items-start gap-3">
                     <Avatar
-                      name={conv.customer_name || 'Unknown'}
+                      name={conv.customer_name || 'Guest Visitor'}
                       size="md"
-                      className="flex-shrink-0 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
+                      role="customer"
+                      className="flex-shrink-0"
                     />
                     <div className="min-w-0 flex-1">
                         <div className="mb-1 flex items-start justify-between gap-2">
@@ -1323,16 +1324,33 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
           <div className="flex flex-col h-full">
             {/* Conversation Header */}
             <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0 sticky top-0 z-10">
-              <div className="flex items-center justify-between gap-4">
+              {/* Row 1: Left Identity & Context, Right Quick Actions */}
+              <div className="flex items-center justify-between gap-3 min-w-0">
+                {/* Left Section: Avatar, Title, Chat ID, Verified Indicator */}
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <Avatar
-                    name={selectedConversation.customer_name || 'Unknown'}
-                    size="md"
-                    className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 flex-shrink-0"
+                    name={selectedConversation.customer_name || 'Guest Visitor'}
+                    size="lg"
+                    role="customer"
+                    className="flex-shrink-0"
                   />
-                  <div className="min-w-[120px] flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800">
+                  <div className="min-w-0 flex-1">
+                    {/* Top Line: Customer Name + Verified Badge + Chat ID */}
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className="font-semibold text-base text-slate-900 dark:text-white truncate max-w-[220px]">
+                        {selectedConversation.customer_name || 'Guest Visitor'}
+                      </span>
+                      
+                      {/* Verification indicator, positioned neatly */}
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex-shrink-0 select-none">
+                        <svg className="w-3 h-3 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                        Verified
+                      </span>
+
+                      {/* Unique Chat ID badge with Copy Action */}
+                      <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 flex-shrink-0 select-none">
                         <span className="font-mono text-xs font-bold text-blue-700 dark:text-blue-300 select-all">
                           {selectedConversation.chat_id || `#${selectedConversation.id}`}
                         </span>
@@ -1355,47 +1373,109 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                           )}
                         </button>
                       </div>
-                      <h2 className="text-base font-semibold text-slate-900 dark:text-white truncate">
+                    </div>
+
+                    {/* Subtitle Line: Conversation Title/Subject + Customer Email */}
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 dark:text-slate-400 min-w-0">
+                      <h2
+                        className="font-normal text-slate-600 dark:text-slate-300 truncate"
+                        title={selectedConversation.subject || 'No Subject'}
+                      >
                         {selectedConversation.subject || 'No Subject'}
                       </h2>
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[160px]">{selectedConversation.customer_name || 'Unknown Customer'}</span>
-                      <Badge variant="success" className="text-[10px] px-1 py-0 flex-shrink-0 inline-flex items-center">
-                        <svg className="mr-0.5 h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Verified
-                      </Badge>
                       {selectedConversation.customer_email && (
                         <>
-                          <span className="flex-shrink-0">•</span>
-                          <span className="truncate max-w-[200px]">{selectedConversation.customer_email}</span>
+                          <span className="flex-shrink-0 text-slate-300 dark:text-slate-600">•</span>
+                          <span className="truncate max-w-[200px]" title={selectedConversation.customer_email}>
+                            {selectedConversation.customer_email}
+                          </span>
                         </>
                       )}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 flex-shrink min-w-0">
+
+                {/* Right Top Controls: Channel Badge + Customer Details Sidebar Toggle */}
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                    <span>💬</span>
+                    <span className="capitalize">{selectedConversation.channel || 'Chat'}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`h-8 px-2 text-xs font-medium border border-slate-200 dark:border-slate-700 ${
+                      rightPanelOpen
+                        ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                    onClick={() => setRightPanelOpen((v) => !v)}
+                    aria-label={rightPanelOpen ? 'Hide customer details' : 'Show customer details'}
+                    title={rightPanelOpen ? 'Hide customer details' : 'Show customer details'}
+                  >
+                    <svg className="h-4 w-4 mr-1 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <span className="hidden md:inline">Details</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Row 2: Action Toolbar */}
+              <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                {/* Left Action Group: Take, Assign, Priority, Status */}
+                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                   {selectedConversation.status === 'pending' && userRole === 'agent' && (
-                    <Button variant="outline" size="sm" onClick={handleTake}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleTake}
+                      className="h-8 px-3 text-xs font-medium whitespace-nowrap shadow-sm"
+                    >
+                      <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
                       Take
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={() => { setShowAssignModal(true); setAssignAgentId(''); setAssignNote(''); }}>
-                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+                  {/* Assign / Reassign Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setShowAssignModal(true); setAssignAgentId(''); setAssignNote(''); }}
+                    className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 inline-flex items-center"
+                    title="Assign or reassign this conversation"
+                  >
+                    <svg className="w-3.5 h-3.5 mr-1.5 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>
-                    Assign
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => { setShowPriorityModal(true); setNewPriority(selectedConversation.priority || 'normal'); }}>
-                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                    </svg>
-                    Priority
+                    <span>
+                      {selectedConversation.assigned_agent_id ? (
+                        <>Agent: <strong className="font-semibold text-blue-600 dark:text-blue-400">{agents.find(a => a.id === selectedConversation.assigned_agent_id)?.full_name || `Agent #${selectedConversation.assigned_agent_id}`}</strong></>
+                      ) : (
+                        'Assign'
+                      )}
+                    </span>
                   </Button>
 
-                  {/* Status Dropdown (replaces Resolve button) */}
+                  {/* Priority Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setShowPriorityModal(true); setNewPriority(selectedConversation.priority || 'normal'); }}
+                    className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 inline-flex items-center"
+                    title="Change priority"
+                  >
+                    <span className={`mr-1.5 inline-block h-2 w-2 rounded-full flex-shrink-0 ${
+                      selectedConversation.priority === 'urgent' ? 'bg-red-500' :
+                      selectedConversation.priority === 'high' ? 'bg-amber-500' :
+                      selectedConversation.priority === 'low' ? 'bg-slate-400' : 'bg-blue-500'
+                    }`} />
+                    <span className="capitalize">{selectedConversation.priority || 'Normal'}</span>
+                  </Button>
+
+                  {/* Status Dropdown */}
                   <div className="relative">
                     <Button
                       id="header-status-dropdown"
@@ -1403,35 +1483,32 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       variant="outline"
                       size="sm"
                       onClick={() => setShowStatusMenu((v) => !v)}
-                      className="capitalize inline-flex items-center"
+                      className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 capitalize inline-flex items-center"
                     >
                       <span
-                        className={`mr-1.5 inline-block h-2 w-2 rounded-full ${
-                          selectedConversation.status === 'open'
-                            ? 'bg-blue-500'
-                            : selectedConversation.status === 'pending'
-                            ? 'bg-amber-500'
-                            : selectedConversation.status === 'waiting_on_customer'
-                            ? 'bg-purple-500'
-                            : selectedConversation.status === 'on_hold'
-                            ? 'bg-slate-500'
-                            : selectedConversation.status === 'resolved' || selectedConversation.status === 'closed'
-                            ? 'bg-emerald-500'
-                            : 'bg-blue-500'
+                        className={`mr-1.5 inline-block h-2 w-2 rounded-full flex-shrink-0 ${
+                          selectedConversation.status === 'open' ? 'bg-blue-500' :
+                          selectedConversation.status === 'pending' ? 'bg-amber-500' :
+                          selectedConversation.status === 'waiting_on_customer' ? 'bg-purple-500' :
+                          selectedConversation.status === 'on_hold' ? 'bg-slate-500' :
+                          selectedConversation.status === 'resolved' || selectedConversation.status === 'closed' ? 'bg-emerald-500' :
+                          'bg-blue-500'
                         }`}
                       />
-                      {selectedConversation.status === 'waiting_on_customer'
-                        ? 'Waiting on Customer'
-                        : selectedConversation.status === 'on_hold'
-                        ? 'On Hold'
-                        : selectedConversation.status.charAt(0).toUpperCase() + selectedConversation.status.slice(1)}
-                      <svg className="ml-1.5 h-3.5 w-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <span>
+                        {selectedConversation.status === 'waiting_on_customer'
+                          ? 'Waiting on Customer'
+                          : selectedConversation.status === 'on_hold'
+                          ? 'On Hold'
+                          : selectedConversation.status.charAt(0).toUpperCase() + selectedConversation.status.slice(1)}
+                      </span>
+                      <svg className="ml-1.5 h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </Button>
 
                     {showStatusMenu && (
-                      <div className="absolute right-0 top-full z-40 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                      <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
                         <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                           Change Status
                         </div>
@@ -1460,7 +1537,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                             }`}
                           >
                             <div className="flex items-center gap-2">
-                              <span className={`h-2 w-2 rounded-full ${item.dot}`} />
+                              <span className={`h-2 w-2 rounded-full flex-shrink-0 ${item.dot}`} />
                               <div>
                                 <p className="font-medium leading-none">{item.label}</p>
                                 <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{item.desc}</p>
@@ -1476,53 +1553,54 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Right Action Group: Link, Merge, Delete */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 inline-flex items-center"
+                    onClick={() => { setLinkTargetId(''); setShowLinkModal(true); }}
+                    title="Link related conversation"
+                  >
+                    <svg className="w-3.5 h-3.5 mr-1.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    Link
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 disabled:opacity-50 inline-flex items-center"
+                    onClick={() => { setMergeTargetId(''); setConfirmCrossCustomer(false); setConfirmMergeExplicit(false); setShowMergeModal(true); }}
+                    title="Merge duplicate conversation"
+                    disabled={selectedConversation.status === 'merged' || Boolean(selectedConversation.merged_into_id)}
+                  >
+                    <svg className="w-3.5 h-3.5 mr-1.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                    Merge
+                  </Button>
+
+                  {(userRole === 'admin' || (user as { role?: string })?.role === 'super_admin') && (
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
-                      className="px-2 text-xs"
-                      onClick={() => { setLinkTargetId(''); setShowLinkModal(true); }}
-                      title="Link related conversation"
+                      className="h-8 px-2.5 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 inline-flex items-center"
+                      onClick={() => setShowDeleteModal(true)}
+                      title="Delete conversation (Cascading permanent deletion)"
                     >
-                      🔗 Link conversation
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="px-2 text-xs"
-                      onClick={() => { setMergeTargetId(''); setConfirmCrossCustomer(false); setConfirmMergeExplicit(false); setShowMergeModal(true); }}
-                      title="Merge duplicate conversation"
-                      disabled={selectedConversation.status === 'merged' || Boolean(selectedConversation.merged_into_id)}
-                    >
-                      🔀 Merge conversation
-                    </Button>
-                    {(userRole === 'admin' || (user as { role?: string })?.role === 'super_admin') && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                        onClick={() => setShowDeleteModal(true)}
-                        title="Delete conversation (Cascading permanent deletion)"
-                      >
-                        🗑️ Delete
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="px-2"
-                      onClick={() => {
-                        setRightPanelOpen((v) => !v);
-                      }}
-                      aria-label={rightPanelOpen ? 'Hide customer details' : 'Show customer details'}
-                      title="Toggle customer details"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a4 4 0 01-4-4V9a4 4 0 014-4h5l3 3v5a4 4 0 01-4 4H9z" />
+                      <svg className="w-3.5 h-3.5 mr-1.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
+                      Delete
                     </Button>
-                  </div>
+                  )}
                 </div>
               </div>
+            </div>
 
               {/* Merged Banner */}
               {selectedConversation.merged_into_id && (
@@ -1708,16 +1786,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     return (
                       <div key={message.id} className="flex gap-3 justify-start items-start">
                         {isAiMessage ? (
-                          <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/40">
-                            <svg className="h-4 w-4 text-purple-700 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                            </svg>
-                          </div>
+                          <Avatar
+                            name="AI Assistant"
+                            size="sm"
+                            role="ai"
+                            className="flex-shrink-0"
+                          />
                         ) : (
                           <Avatar
                             name={selectedConversation?.customer_name || 'Customer'}
                             size="sm"
-                            className="bg-slate-400 text-white flex-shrink-0"
+                            role="customer"
+                            className="flex-shrink-0"
                           />
                         )}
                         <div className="max-w-[75%]">
@@ -2114,7 +2194,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                    </button>
                    <div className="mt-3 space-y-2">
                      <div className="flex items-center gap-3">
-                       <Avatar name={selectedConversation.customer_name || 'Unknown'} size="md" className="bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300" />
+                       <Avatar name={selectedConversation.customer_name || 'Guest Visitor'} size="lg" role="customer" className="flex-shrink-0" />
                        <div className="min-w-0 flex-1">
                          <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
                            {selectedConversation.customer_name || 'Unknown Customer'}

@@ -138,7 +138,7 @@ export default function AgentContactsPage() {
               className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700"
             >
               <div className="flex items-start gap-3">
-                <Avatar name={contact.name} size="md" className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" />
+                <Avatar name={contact.name} size="md" role="customer" className="flex-shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{contact.name}</p>
                   <p className="truncate text-xs text-slate-500 dark:text-slate-400">{contact.email || 'No email'}</p>
