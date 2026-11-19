@@ -28,6 +28,12 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
+      - name: Inspect OIDC Token Claims (Non-sensitive)
+        run: |
+          echo "=== Inspecting GitHub OIDC Token Metadata ==="
+          ID_TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" -H "User-Agent: actions/oidc-client" -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')
+          python3 -c "import sys, json, base64; t=sys.argv[1]; p=t.split('.')[1]; claims=json.loads(base64.urlsafe_b64decode(p + '===').decode('utf-8')); print('sub claim:', claims.get('sub')); print('aud claim:', claims.get('aud')); print('repository:', claims.get('repository')); print('environment:', claims.get('environment')); print('ref:', claims.get('ref'))" "$ID_TOKEN"
+
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
