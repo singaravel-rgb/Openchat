@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, require_roles
+from app.core.config import settings
 from app.core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from app.db.session import get_db
 from app.models.ai import AIConfig, AIUsageLog
