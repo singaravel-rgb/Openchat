@@ -91,7 +91,7 @@ def login(
         "admin@demo.com",
     )
     is_demo_pass = form_data.password in ("demo1234", "password123")
-    if is_demo_user or (is_demo_pass and settings.environment.lower() != "development"):
+    if is_demo_user or (is_demo_pass and settings.environment.lower() not in ("development", "testing")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Demo accounts and default credentials are permanently disabled.",
