@@ -51,69 +51,14 @@ resource "aws_security_group" "test_host" {
   }
 }
 
-# IAM Role for AWS Systems Manager (SSM) & S3 Backups
-resource "aws_iam_role" "test_host" {
-  name = "${var.project_name}-host-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-}
-
-# Attach AmazonSSMManagedInstanceCore for secure, browser-based terminal access
-resource "aws_iam_role_policy_attachment" "ssm_core" {
-  role       = aws_iam_role.test_host.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-# Policy for S3 database backups & SSM Parameter Store runtime secrets
-resource "aws_iam_role_policy" "backup_and_secrets" {
-  name = "${var.project_name}-host-policy"
-  role = aws_iam_role.test_host.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "S3Backups"
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.db_backups.arn,
-          "${aws_s3_bucket.db_backups.arn}/*"
-        ]
-      },
-      {
-        Sid    = "SSMSecrets"
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameter",
-          "ssm:GetParameters"
-        ]
-        Resource = [
-          aws_ssm_parameter.test_env.arn
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_instance_profile" "test_host" {
+# ==============================================================================
+# EC2 Host IAM Instance Profile
+# Pre-provisioned during the controlled bootstrap step.
+# Referenced as a read-only data source to eliminate IAM write/management
+# permissions from the routine Terraform deployment identity.
+# ==============================================================================
+data "aws_iam_instance_profile" "test_host" {
   name = "${var.project_name}-instance-profile"
-  role = aws_iam_role.test_host.name
 }
 
 # EC2 Instance
@@ -122,7 +67,7 @@ resource "aws_instance" "test_host" {
   instance_type               = var.instance_type
   subnet_id                   = tolist(data.aws_subnets.default.ids)[0]
   associate_public_ip_address = true
-  iam_instance_profile        = aws_iam_instance_profile.test_host.name
+  iam_instance_profile        = data.aws_iam_instance_profile.test_host.name
   vpc_security_group_ids = [
     aws_security_group.test_host.id
   ]
