@@ -553,6 +553,36 @@ def send_admin_message(
     return msg
 
 
+@router.post("/conversations/{conversation_id}/resolve")
+def resolve_conversation_admin(
+    conversation_id: int,
+    data: StatusUpdateRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    svc_resolve(db, conversation, current_user, resolution_details=(data.resolution_details if data else None))
+    db.commit()
+    return {"message": "Conversation resolved successfully"}
+
+
+@router.post("/conversations/{conversation_id}/close")
+def close_conversation_admin(
+    conversation_id: int,
+    data: StatusUpdateRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    svc_close(db, conversation, current_user, resolution_details=(data.resolution_details if data else None))
+    db.commit()
+    return {"message": "Conversation closed successfully"}
+
+
 @router.post("/conversations/{conversation_id}/reopen")
 def reopen_conversation_admin(
     conversation_id: int,

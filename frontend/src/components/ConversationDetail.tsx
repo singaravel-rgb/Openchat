@@ -171,7 +171,7 @@ export function ConversationDetailView({ conversation, onUpdate, mode }: Convers
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <Badge variant={getStatusBadgeVariant(conversation.status)}>{conversation.status.replace('_', ' ')}</Badge>
                   <Badge variant={conversation.priority === 'high' || conversation.priority === 'urgent' ? 'warning' : 'default'}>{conversation.priority || 'normal'}</Badge>
-                  {conversation.assigned_agent_id && <Badge variant="primary">Agent #{conversation.assigned_agent_id}</Badge>}
+                  {conversation.assigned_agent_id && <Badge variant="primary">{agents.find(a => a.id === conversation.assigned_agent_id)?.full_name || conversation.assigned_agent_name || 'Assigned Agent'}</Badge>}
                 </div>
               </div>
             </div>

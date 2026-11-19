@@ -202,7 +202,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [isEditingGlobalNote, setIsEditingGlobalNote] = useState(false);
   const [savingGlobalNote, setSavingGlobalNote] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
-  const [workspaceCategory, setWorkspaceCategory] = useState<'all' | 'ai' | 'human'>('all');
+  const [primaryFilter, setPrimaryFilter] = useState<'all' | 'ai' | 'me' | 'agent'>('all');
+  const [selectedOtherAgentId, setSelectedOtherAgentId] = useState<string>('all');
 
   // Private note editing
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
@@ -1027,21 +1028,29 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   }, [loadConversations]);
 
   const aiCount = useMemo(() => conversations.filter(c => c.status === 'ai_handling').length, [conversations]);
-  const humanCount = useMemo(() => conversations.filter(c => c.status !== 'ai_handling').length, [conversations]);
+  const meCount = useMemo(() => conversations.filter(c => c.assigned_agent_id === userId).length, [conversations, userId]);
+  const otherAgentCount = useMemo(() => conversations.filter(c => c.assigned_agent_id && c.assigned_agent_id !== userId).length, [conversations, userId]);
   const totalCount = conversations.length;
 
   const filteredConversations = useMemo(() => {
     const searchQuery = userRole === 'admin' ? adminFilters.q : searchTerm;
     const filtered = conversations.filter((c) => {
-      if (workspaceCategory === 'ai' && c.status !== 'ai_handling') return false;
-      if (workspaceCategory === 'human' && c.status === 'ai_handling') return false;
+      if (primaryFilter === 'ai' && c.status !== 'ai_handling') return false;
+      if (primaryFilter === 'me' && c.assigned_agent_id !== userId) return false;
+      if (primaryFilter === 'agent') {
+        if (!c.assigned_agent_id || c.assigned_agent_id === userId) return false;
+        if (selectedOtherAgentId !== 'all' && c.assigned_agent_id !== Number(selectedOtherAgentId)) return false;
+      }
 
+      const agentObj = c.assigned_agent_id ? agents.find(a => a.id === c.assigned_agent_id) : null;
+      const agentName = c.assigned_agent_name || (agentObj ? agentObj.full_name : '');
       const matchesSearch =
         (c.chat_id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.subject || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.customer_email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.last_message || '').toLowerCase().includes(searchQuery.toLowerCase());
+        (c.last_message || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        agentName.toLowerCase().includes(searchQuery.toLowerCase());
       if (!matchesSearch) return false;
       if (userRole !== 'agent' || queueFilter === 'all') return true;
       if (queueFilter === 'unassigned') return !c.assigned_agent_id;
@@ -1063,7 +1072,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       return timeOf(b) - timeOf(a);
     });
     return sorted;
-  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy, queueFilter, workspaceCategory]);
+  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy, queueFilter, primaryFilter, selectedOtherAgentId, userId, agents]);
 
   // Layout dimensions
   const rightWidth = rightPanelOpen ? 330 : 56;
@@ -1109,43 +1118,83 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
             </div>
           </div>
 
-          {/* AI vs Human Support Top-Level Filter Tabs */}
-          <div className="mt-2.5 flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-lg">
-            <button
-              type="button"
-              onClick={() => setWorkspaceCategory('all')}
-              className={`flex-1 py-1 px-1.5 text-xs font-medium rounded transition-all text-center ${
-                workspaceCategory === 'all'
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              All ({totalCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceCategory('ai')}
-              className={`flex-1 py-1 px-1.5 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
-                workspaceCategory === 'ai'
-                  ? 'bg-purple-600 text-white shadow-xs'
-                  : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40'
-              }`}
-            >
-              <span>🤖 AI</span>
-              <span className={`px-1 py-0.2 rounded-full text-[10px] ${workspaceCategory === 'ai' ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300'}`}>{aiCount}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceCategory('human')}
-              className={`flex-1 py-1 px-1.5 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
-                workspaceCategory === 'human'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40'
-              }`}
-            >
-              <span>👤 Human</span>
-              <span className={`px-1 py-0.2 rounded-full text-[10px] ${workspaceCategory === 'human' ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300'}`}>{humanCount}</span>
-            </button>
+          {/* 4 Clean Primary Filters: All, AI, Me, Agent */}
+          <div className="mt-2.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-lg">
+            <div className="grid grid-cols-4 gap-1">
+              <button
+                type="button"
+                id="filter-tab-all"
+                onClick={() => setPrimaryFilter('all')}
+                className={`py-1 px-1 text-xs font-medium rounded transition-all text-center flex items-center justify-center gap-1 ${
+                  primaryFilter === 'all'
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <span>All</span>
+                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'all' ? 'bg-slate-200 dark:bg-slate-600 text-slate-800 dark:text-white font-bold' : 'bg-slate-200/60 dark:bg-slate-700 text-slate-600 dark:text-slate-400'}`}>{totalCount}</span>
+              </button>
+              <button
+                type="button"
+                id="filter-tab-ai"
+                onClick={() => setPrimaryFilter('ai')}
+                className={`py-1 px-1 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
+                  primaryFilter === 'ai'
+                    ? 'bg-purple-600 text-white shadow-xs font-semibold'
+                    : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40'
+                }`}
+              >
+                <span>🤖 AI</span>
+                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'ai' ? 'bg-purple-700 text-white font-bold' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300'}`}>{aiCount}</span>
+              </button>
+              <button
+                type="button"
+                id="filter-tab-me"
+                onClick={() => setPrimaryFilter('me')}
+                className={`py-1 px-1 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
+                  primaryFilter === 'me'
+                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                    : 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40'
+                }`}
+              >
+                <span>👤 Me</span>
+                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'me' ? 'bg-blue-700 text-white font-bold' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300'}`}>{meCount}</span>
+              </button>
+              <button
+                type="button"
+                id="filter-tab-agent"
+                onClick={() => setPrimaryFilter('agent')}
+                className={`py-1 px-1 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
+                  primaryFilter === 'agent'
+                    ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                    : 'text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
+                }`}
+              >
+                <span>👥 Agent</span>
+                <span className={`px-1 py-0.2 rounded-full text-[10px] ${primaryFilter === 'agent' ? 'bg-indigo-700 text-white font-bold' : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300'}`}>{otherAgentCount}</span>
+              </button>
+            </div>
+
+            {primaryFilter === 'agent' && (
+              <div className="mt-1.5 pt-1.5 border-t border-slate-200/80 dark:border-slate-700/80">
+                <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">Select Agent:</label>
+                <select
+                  value={selectedOtherAgentId}
+                  onChange={(e) => setSelectedOtherAgentId(e.target.value)}
+                  className="w-full text-xs py-1 px-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="all">All Other Agents ({otherAgentCount})</option>
+                  {agents.filter(a => a.id !== userId).map(a => {
+                    const count = conversations.filter(c => c.assigned_agent_id === a.id).length;
+                    return (
+                      <option key={a.id} value={String(a.id)}>
+                        {a.full_name} ({count} active)
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="mt-3 space-y-2">
@@ -1614,8 +1663,38 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   </div>
                 </div>
 
-                {/* Right Action Group: Link, Merge, Delete */}
+                {/* Right Action Group: Resolve, Link, Merge, Delete */}
                 <div className="flex items-center gap-1.5 flex-wrap">
+                  {selectedConversation.status !== 'resolved' && selectedConversation.status !== 'closed' ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      id="header-resolve-btn"
+                      className="h-8 px-3 text-xs font-semibold whitespace-nowrap bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center shadow-xs"
+                      onClick={() => setShowResolveModal(true)}
+                      title="Mark conversation as resolved"
+                    >
+                      <svg className="w-3.5 h-3.5 mr-1 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Resolve
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      id="header-reopen-btn"
+                      className="h-8 px-3 text-xs font-medium whitespace-nowrap bg-white dark:bg-slate-800 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 inline-flex items-center shadow-xs"
+                      onClick={handleReopen}
+                      title="Reopen resolved conversation"
+                    >
+                      <svg className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      Reopen
+                    </Button>
+                  )}
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -2529,19 +2608,22 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                            </p>
                          </div>
                        </div>
-                       {(assignmentHistory || []).slice(-5).map((entry, index) => (
-                         <div key={`assignment-${index}`} className="flex items-start gap-2 text-slate-500 dark:text-slate-400">
-                           <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-500" />
-                           <div className="min-w-0">
-                             <p>Assigned to {String((entry as Record<string, unknown>).agent_name ?? (entry as Record<string, unknown>).agent_id ?? 'agent')}</p>
-                             <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                               {formatFullTimestamp(
-                                 (entry as Record<string, unknown>).assigned_at as string | undefined,
-                               )}
-                             </p>
+                       {(assignmentHistory || []).slice(-5).map((entry, index) => {
+                         const e = entry as Record<string, unknown>;
+                         const toId = e.to_agent_id ?? e.agent_id;
+                         const toName = e.to_agent_name ?? e.agent_name ?? (toId ? agents.find(a => a.id === Number(toId))?.full_name : null) ?? (toId ? `Agent #${toId}` : 'agent');
+                         return (
+                           <div key={`assignment-${index}`} className="flex items-start gap-2 text-slate-500 dark:text-slate-400">
+                             <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-500" />
+                             <div className="min-w-0">
+                               <p>Assigned to {String(toName)}</p>
+                               <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                                 {formatFullTimestamp(e.assigned_at as string | undefined)}
+                               </p>
+                             </div>
                            </div>
-                         </div>
-                       ))}
+                         );
+                       })}
                        {messages
                          .filter((m) => m.message_type === 'system_event' || m.sender_type === 'system')
                          .slice(-5)

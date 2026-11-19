@@ -97,8 +97,20 @@ def health_root():
 @app.on_event("startup")
 async def startup_event():
     import asyncio
+    from app.db.session import SessionLocal
+
+    # Seed default published bot flow if missing
+    try:
+        db = SessionLocal()
+        try:
+            from app.services.bot_flow_service import seed_default_bot_flow
+            seed_default_bot_flow(db)
+        finally:
+            db.close()
+    except Exception:
+        pass
+
     async def _escalation_monitoring_loop():
-        from app.db.session import SessionLocal
         from app.services.escalation_service import check_response_deadlines_and_escalate
         while True:
             try:

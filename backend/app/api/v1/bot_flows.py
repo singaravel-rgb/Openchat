@@ -89,7 +89,7 @@ def update_bot_flow(
         raise HTTPException(status_code=404, detail="Bot flow not found")
 
     # Only creator or admin can update
-    if flow.created_by_id != current_user.id and current_user.role != "admin":
+    if flow.created_by_id != current_user.id and current_user.role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Not authorized to update this bot flow")
 
     for field, value in data.model_dump(exclude_unset=True).items():
@@ -112,7 +112,7 @@ def delete_bot_flow(
         raise HTTPException(status_code=404, detail="Bot flow not found")
 
     # Only creator or admin can delete
-    if flow.created_by_id != current_user.id and current_user.role != "admin":
+    if flow.created_by_id != current_user.id and current_user.role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Not authorized to delete this bot flow")
 
     db.delete(flow)
@@ -133,7 +133,7 @@ def publish_bot_flow(
         raise HTTPException(status_code=404, detail="Bot flow not found")
 
     # Only creator or admin can publish
-    if flow.created_by_id != current_user.id and current_user.role != "admin":
+    if flow.created_by_id != current_user.id and current_user.role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Not authorized to publish this bot flow")
 
     # If setting as default, unset other defaults
@@ -158,7 +158,7 @@ def archive_bot_flow(
     if not flow:
         raise HTTPException(status_code=404, detail="Bot flow not found")
 
-    if flow.created_by_id != current_user.id and current_user.role != "admin":
+    if flow.created_by_id != current_user.id and current_user.role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Not authorized to archive this bot flow")
 
     flow.status = "archived"

@@ -695,12 +695,96 @@ def mark_conversation_read(db: Session, conversation: Conversation, role: str) -
         conversation.agent_last_read_at = now
 
 
+async def _execute_ai_turn_for_conversation(db: Session, conversation_id: int, customer_id: int) -> None:
+    try:
+        conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        customer = db.query(User).filter(User.id == customer_id).first()
+        if not conversation or not customer:
+            return
+        if conversation.status != ConversationStatus.AI_HANDLING:
+            return
+
+        from app.services.ai_service import process_ai_turn
+        from app.services.assignment_service import assign_conversation_to_agent
+
+        history_messages = (
+            db.query(Message)
+            .filter(Message.conversation_id == conversation.id, Message.is_retracted == False)  # noqa: E712
+            .order_by(Message.created_at.asc(), Message.id.asc())
+            .all()
+        )
+        result = await process_ai_turn(db, conversation, history_messages, customer)
+        if result:
+            ai_metadata = {
+                "provider": result.provider,
+                "model": result.model,
+                "latency_ms": result.latency_ms,
+                "decision": result.decision,
+                "confidence": result.confidence,
+                "sources": result.sources or [],
+                "knowledge": result.sources or [],
+                "escalated": result.should_escalate,
+                "escalation_reason": result.escalation_reason,
+            }
+            if result.answer:
+                # Idempotency check: prevent duplicate AI message for this turn
+                duplicate_check = (
+                    db.query(Message)
+                    .filter(
+                        Message.conversation_id == conversation.id,
+                        Message.sender_type == MessageSenderType.AI,
+                        Message.content == result.answer,
+                    )
+                    .first()
+                )
+                if not duplicate_check:
+                    ai_msg = Message(
+                        conversation_id=conversation.id,
+                        sender_id=None,
+                        sender_type=MessageSenderType.AI,
+                        message_type=MessageType.TEXT,
+                        content=result.answer,
+                        is_internal=False,
+                        delivery_status="delivered",
+                        ai_metadata=ai_metadata,
+                    )
+                    db.add(ai_msg)
+                    db.commit()
+
+            if result.should_escalate:
+                conversation.status = ConversationStatus.PENDING
+                record_system_event(
+                    db,
+                    conversation,
+                    "Customer requested human assistance" if result.decision == "handoff_requested" else f"AI escalated to human support: {result.escalation_reason or 'assistance needed'}"
+                )
+                assign_conversation_to_agent(db, conversation)
+                db.commit()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("AI turn execution error")
+        db.rollback()
+
+
+async def _run_ai_turn_background(conversation_id: int, customer_id: int) -> None:
+    from app.db.session import SessionLocal
+    bg_db = SessionLocal()
+    try:
+        await _execute_ai_turn_for_conversation(bg_db, conversation_id, customer_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Background AI turn failed: %s", e)
+    finally:
+        bg_db.close()
+
+
 async def process_customer_message(
     db: Session,
     conversation: Conversation,
     customer: User,
     content: str,
-    client_message_id: Optional[str] = None
+    client_message_id: Optional[str] = None,
+    sync_ai: bool = False,
 ) -> Message:
     """Process a customer message: save it, trigger AI response if applicable.
     
@@ -720,75 +804,14 @@ async def process_customer_message(
         if existing_msg:
             return existing_msg
 
-    # Save customer message
+    # Save customer message immediately
     customer_msg = add_message(
         db, conversation, customer, content,
         is_internal=False,
         message_type=MessageType.TEXT,
         client_message_id=client_message_id
     )
-    db.flush()
-
-    # If conversation is in AI_HANDLING status, trigger AI response
-    if conversation.status == ConversationStatus.AI_HANDLING:
-        try:
-            from app.services.ai_service import process_ai_turn
-            from app.services.assignment_service import assign_conversation_to_agent
-
-            history_messages = (
-                db.query(Message)
-                .filter(Message.conversation_id == conversation.id)
-                .order_by(Message.created_at.asc(), Message.id.asc())
-                .all()
-            )
-            result = await process_ai_turn(db, conversation, history_messages, customer)
-            if result:
-                ai_metadata = {
-                    "provider": result.provider,
-                    "model": result.model,
-                    "latency_ms": result.latency_ms,
-                    "decision": result.decision,
-                    "confidence": result.confidence,
-                    "sources": result.sources or [],
-                    "knowledge": result.sources or [],
-                    "escalated": result.should_escalate,
-                    "escalation_reason": result.escalation_reason,
-                }
-                if result.answer:
-                    # Idempotency check: prevent duplicate AI message for this turn
-                    duplicate_check = (
-                        db.query(Message)
-                        .filter(
-                            Message.conversation_id == conversation.id,
-                            Message.sender_type == MessageSenderType.AI,
-                            Message.created_at >= customer_msg.created_at,
-                        )
-                        .first()
-                    )
-                    if not duplicate_check:
-                        ai_msg = Message(
-                            conversation_id=conversation.id,
-                            sender_id=None,
-                            sender_type=MessageSenderType.AI,
-                            message_type=MessageType.TEXT,
-                            content=result.answer,
-                            is_internal=False,
-                            ai_metadata=ai_metadata,
-                        )
-                        db.add(ai_msg)
-
-                if result.should_escalate:
-                    conversation.status = ConversationStatus.PENDING
-                    record_system_event(
-                        db,
-                        conversation,
-                        "Customer requested human assistance" if result.decision == "handoff_requested" else f"AI escalated to human support: {result.escalation_reason or 'assistance needed'}"
-                    )
-                    assign_conversation_to_agent(db, conversation)
-        except Exception:
-            # Log error but don't fail the customer message
-            import logging
-            logging.getLogger(__name__).exception("AI response failed")
+    customer_msg.delivery_status = "delivered"
 
     # Notify assigned agent of customer reply if conversation is assigned
     if conversation.assigned_agent_id and conversation.status in (ConversationStatus.ASSIGNED, ConversationStatus.OPEN):
@@ -808,8 +831,19 @@ async def process_customer_message(
         except Exception:
             pass
 
+    # Commit customer message immediately so HTTP response returns in <50ms with delivery_status: delivered
     db.commit()
     db.refresh(customer_msg)
+
+    # If conversation is in AI_HANDLING status, trigger AI response
+    if conversation.status == ConversationStatus.AI_HANDLING:
+        if sync_ai:
+            await _execute_ai_turn_for_conversation(db, conversation.id, customer.id)
+            db.refresh(conversation)
+        else:
+            import asyncio
+            asyncio.create_task(_run_ai_turn_background(conversation.id, customer.id))
+
     return customer_msg
 
 

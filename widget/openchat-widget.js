@@ -315,11 +315,16 @@
     }
   }
 
-  async function startConversation(){
+  async function startConversation(initialMessage){
     state.loading = true;
     render();
     try {
-      var d = await api('/conversations', { method: 'POST', json: true, body: JSON.stringify({ subject: 'Website chat' }) });
+      var body = { subject: 'Website chat' };
+      if (initialMessage) {
+        body.initial_message = initialMessage;
+        body.client_message_id = 'client_' + nowId();
+      }
+      var d = await api('/conversations', { method: 'POST', json: true, body: JSON.stringify(body) });
       state.detail = d;
       state.activeId = d.id;
       await loadConversations();
@@ -515,6 +520,14 @@
         if (!state.detail) {
           panel += '<div style="margin-bottom:12px;color:#334155;font-size:13px">' + esc(cfg.welcome_message || 'Hi! How can we help?') + '</div>';
           panel += '<button class="ocw-btn ocw-btn-primary" id="ocw-start" style="background:' + esc(primary) + ';width:100%">' + (state.loading ? 'Connecting...' : 'Start new conversation') + '</button>';
+          panel += '<div style="margin:14px 0 6px;font-size:12px;color:#475569;font-weight:600">Quick Assistance & Topics</div>';
+          panel += '<div class="ocw-topics" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">' +
+            '<button type="button" class="ocw-topic-btn" data-topic="📦 Order or Booking" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>📦 Order or Booking</span><span style="color:#94a3b8">→</span></button>' +
+            '<button type="button" class="ocw-topic-btn" data-topic="💳 Payment and Billing" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>💳 Payment and Billing</span><span style="color:#94a3b8">→</span></button>' +
+            '<button type="button" class="ocw-topic-btn" data-topic="🔄 Refund or Cancellation" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>🔄 Refund or Cancellation</span><span style="color:#94a3b8">→</span></button>' +
+            '<button type="button" class="ocw-topic-btn" data-topic="🛠️ Technical Support" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>🛠️ Technical Support</span><span style="color:#94a3b8">→</span></button>' +
+            '<button type="button" class="ocw-topic-btn" data-topic="👤 Account Assistance" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>👤 Account Assistance</span><span style="color:#94a3b8">→</span></button>' +
+            '</div>';
           panel += '<div style="margin:14px 0 8px;font-size:12px;color:#64748b;font-weight:600">Your conversations</div>';
           if (state.conversations && state.conversations.length) {
             panel += '<div class="ocw-list">';
@@ -556,13 +569,19 @@
                 }
               }
 
-              panel += '<div class="' + cls + '"><div class="ocw-bubble" style="' + bubbleStyle + '">' + content + '</div><div class="ocw-meta">' + fmtTime(m.created_at) + (m.sender_type === 'ai' ? ' • AI' : (m.sender_type === 'agent' ? ' • Agent' : '')) + statusBadge + '</div></div>';
+              var senderLabel = (m.sender_type === 'customer') ? 'You' : 'OpenChat Support';
+              panel += '<div class="' + cls + '"><div class="ocw-bubble" style="' + bubbleStyle + '">' + content + '</div><div class="ocw-meta">' + senderLabel + ' • ' + fmtTime(m.created_at) + statusBadge + '</div></div>';
             });
           } else {
             panel += '<div class="ocw-empty">Send a message to begin chatting.</div>';
           }
           panel += '</div>';
-          panel += '<div class="ocw-footer"><textarea id="ocw-text" class="ocw-input" placeholder="Type a message…"></textarea><div class="ocw-row"><button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:' + esc(primary) + (state.sending ? ';opacity:0.6;cursor:not-allowed;' : '') + '"' + (state.sending ? ' disabled' : '') + '>' + (state.sending ? 'Sending...' : 'Send') + '</button><button class="ocw-btn ocw-btn-ghost" id="ocw-human">Talk to a human</button></div></div>';
+          panel += '<div class="ocw-qr-bar" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px 6px;background:#f8fafc;border-top:1px solid #f1f5f9">' +
+            '<button type="button" class="ocw-qr-btn" data-qr="Track my order status" style="font-size:11px;padding:3px 8px;border-radius:12px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;cursor:pointer">Track order</button>' +
+            '<button type="button" class="ocw-qr-btn" data-qr="How do I download a tax invoice?" style="font-size:11px;padding:3px 8px;border-radius:12px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;cursor:pointer">Download invoice</button>' +
+            '<button type="button" class="ocw-qr-btn" data-qr="Check my refund status" style="font-size:11px;padding:3px 8px;border-radius:12px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;cursor:pointer">Refund status</button>' +
+            '</div>';
+          panel += '<div class="ocw-footer"><textarea id="ocw-text" class="ocw-input" placeholder="Type a message…"></textarea><div class="ocw-row"><button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:' + esc(primary) + (state.sending ? ';opacity:0.6;cursor:not-allowed;' : '') + ';width:100%"' + (state.sending ? ' disabled' : '') + '>' + (state.sending ? 'Sending...' : 'Send') + '</button></div></div>';
         }
         panel += '</div>';
       }
@@ -685,6 +704,29 @@
         var c = btn.getAttribute('data-content');
         var cid = btn.getAttribute('data-cid');
         sendMessage(c, cid);
+      };
+    });
+    var topicButtons = $$('.ocw-topic-btn');
+    topicButtons.forEach(function(btn){
+      btn.onclick = function(e){
+        e.stopPropagation();
+        var topic = btn.getAttribute('data-topic');
+        ensureSession().then(function(){
+          return startConversation(topic);
+        }).catch(function(err){
+          logError('topicBtn -> ensureSession', err);
+          setError(err.message || 'Cannot start conversation');
+        });
+      };
+    });
+    var qrButtons = $$('.ocw-qr-btn');
+    qrButtons.forEach(function(btn){
+      btn.onclick = function(e){
+        e.stopPropagation();
+        var qr = btn.getAttribute('data-qr');
+        if (!state.sending) {
+          sendMessage(qr);
+        }
       };
     });
     var messagesContainer = shadowRoot.querySelector('.ocw-list');

@@ -164,6 +164,10 @@ def test_agent_to_agent_reassignment():
     try:
         agent1 = _get_or_create_user(db, "transfer.agent1@test.com", "agent", "Agent One")
         agent2 = _get_or_create_user(db, "transfer.agent2@test.com", "agent", "Agent Two")
+        if agent2.agent_profile:
+            agent2.agent_profile.max_conversations = 50
+            agent2.agent_profile.is_available = True
+            db.commit()
         cust = _get_or_create_user(db, "transfer.cust@test.com", "customer", "Transfer Customer")
         a1_token = _login("transfer.agent1@test.com")
         a2_token = _login("transfer.agent2@test.com")

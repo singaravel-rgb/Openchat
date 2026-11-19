@@ -276,8 +276,22 @@ async def create_conversation(
     db.commit()
     db.refresh(conversation)
 
+    # Initial friendly support greeting
+    greeting_msg = Message(
+        conversation_id=conversation.id,
+        sender_id=None,
+        sender_type=MessageSenderType.AI,
+        message_type=MessageType.TEXT,
+        content="Hello! Welcome to OpenChat Support. How can we help you today?",
+        is_internal=False,
+        delivery_status="delivered",
+        ai_metadata={"system_greeting": True},
+    )
+    db.add(greeting_msg)
+    db.commit()
+
     if data.initial_message and data.initial_message.strip():
-        await process_customer_message(db, conversation, user, data.initial_message.strip(), client_message_id=data.client_message_id)
+        await process_customer_message(db, conversation, user, data.initial_message.strip(), client_message_id=data.client_message_id, sync_ai=False)
         db.refresh(conversation)
 
     messages = (
@@ -342,8 +356,20 @@ async def send_message(
         from app.services.conversation_service import reopen_conversation
         reopen_conversation(db, conversation, user)
         db.flush()
-    msg = await process_customer_message(db, conversation, user, data.content, client_message_id=data.client_message_id)
+    msg = await process_customer_message(db, conversation, user, data.content, client_message_id=data.client_message_id, sync_ai=False)
     return _msg_to_widget(msg)
+
+
+@router.get("/bot-flow")
+def get_widget_bot_flow(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    rate_limit_for_request(request, "widget:botflow", 120, 60)
+    cfg = _cfg_or_503(db)
+    validate_widget_origin(cfg, request, require_when_configured=True)
+    from app.services.bot_flow_service import get_active_bot_flow_data
+    return get_active_bot_flow_data(db)
 
 
 @router.post("/conversations/{conversation_id}/reopen")
@@ -530,7 +556,8 @@ def build_widget_js(api_base: str) -> str:
           if(state.loading && msgs.length===0) panel += '<div class="ocw-empty">Loading conversation...</div>';
           if(!state.loading && msgs.length===0) panel += '<div class="ocw-empty">No messages yet. Say hello!</div>';
           msgs.forEach(function(m){ var cls = (m.sender_type==='customer')?'ocw-user':'ocw-agent'; if(m.sender_type==='ai') cls='ocw-ai'; if(m.sender_type==='system') cls='ocw-system';
-            panel += '<div class="ocw-msg '+cls+'"><div><div class="ocw-bubble" '+(m.sender_type==='customer'?'style="background:'+esc(primary)+'"':'')+'>'+esc(m.content)+'</div><div class="ocw-meta">'+esc(m.sender_type)+(m.delivery_status&&m.sender_type==='customer'?' · '+esc(m.delivery_status):'')+' · '+esc(fmtTime(m.created_at))+'</div></div></div>'; });
+            var senderLabel = (m.sender_type==='customer') ? ('You' + (m.delivery_status ? ' · ' + esc(m.delivery_status) : '')) : 'OpenChat Support';
+            panel += '<div class="ocw-msg '+cls+'"><div><div class="ocw-bubble" '+(m.sender_type==='customer'?'style="background:'+esc(primary)+'"':'')+'>'+esc(m.content)+'</div><div class="ocw-meta">'+senderLabel+' · '+esc(fmtTime(m.created_at))+'</div></div></div>'; });
           panel += '<div id="ocw-bottom"></div>';
         }
         panel += '</div>';
@@ -541,7 +568,7 @@ def build_widget_js(api_base: str) -> str:
           else if(state.detail.status==='assigned'){ panel += '<div style="font-size:12px;color:#334155;margin-bottom:6px">A human agent is assisting you.</div>'; }
           if(canSend){
             panel += '<textarea id="ocw-text" class="ocw-input" placeholder="Type a message..."></textarea>';
-            panel += '<div class="ocw-row"><button class="ocw-btn ocw-btn-ghost" id="ocw-human">Request human</button><button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:'+esc(primary)+';margin-left:auto">'+(state.sending?'Sending...':'Send')+'</button></div>';
+            panel += '<div class="ocw-row"><button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:'+esc(primary)+';width:100%">'+(state.sending?'Sending...':'Send')+'</button></div>';
           } else {
             panel += '<div class="ocw-empty" style="padding:8px">This conversation is '+esc(state.detail.status)+'. Start a new conversation if you need more help.</div>';
             panel += '<button class="ocw-btn ocw-btn-primary" id="ocw-start2" style="background:'+esc(primary)+';width:100%">Start new conversation</button>';

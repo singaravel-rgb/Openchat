@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -101,7 +102,12 @@ def assign_conversation_to_agent(db: Session, conversation: Conversation) -> boo
         agent_profile.active_conversations = (agent_profile.active_conversations or 0) + 1
 
     history = list(getattr(conversation, "assignment_history", None) or [])
-    history.append({"type": "auto_assigned", "to_agent_id": agent.id})
+    history.append({
+        "type": "auto_assigned",
+        "to_agent_id": agent.id,
+        "to_agent_name": agent.full_name,
+        "assigned_at": datetime.utcnow().isoformat(),
+    })
     conversation.assignment_history = history
 
     system_message = Message(
