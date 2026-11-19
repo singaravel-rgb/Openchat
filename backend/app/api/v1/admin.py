@@ -122,16 +122,7 @@ def get_admin_stats(
         )
         .count()
     )
-    unanswered_conversations = (
-        db.query(Conversation)
-        .filter(
-            Conversation.status.in_([ConversationStatus.PENDING, ConversationStatus.OPEN, ConversationStatus.WAITING_ON_CUSTOMER]),
-            Conversation.unread_count > 0,
-        )
-        .count()
-    )
-    if unanswered_conversations == 0 and pending_conversations > 0:
-        unanswered_conversations = pending_conversations
+    unanswered_conversations = pending_conversations + waiting_on_customer_conversations
 
     return {
         "conversations": {
