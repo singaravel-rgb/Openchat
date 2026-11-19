@@ -1,0 +1,14 @@
+{
+  "commands": [
+    "cd /opt/openchat",
+    "git fetch origin release/v1.0.0-aws-production",
+    "git checkout release/v1.0.0-aws-production",
+    "git pull origin release/v1.0.0-aws-production",
+    "git log -1 --oneline",
+    "docker compose -f docker-compose.test.yml --env-file .env build backend frontend",
+    "docker compose -f docker-compose.test.yml --env-file .env up -d --no-deps backend celery-worker celery-beat frontend",
+    "docker compose -f docker-compose.test.yml --env-file .env restart nginx",
+    "docker compose -f docker-compose.test.yml exec -T backend python -c \"from app.db.session import SessionLocal; from app.services.bot_flow_service import seed_default_bot_flow; db=SessionLocal(); seed_default_bot_flow(db); print('Bot flow seed verified')\"",
+    "docker compose -f docker-compose.test.yml ps"
+  ]
+}
