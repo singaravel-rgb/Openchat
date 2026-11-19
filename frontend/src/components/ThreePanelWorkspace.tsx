@@ -202,6 +202,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [isEditingGlobalNote, setIsEditingGlobalNote] = useState(false);
   const [savingGlobalNote, setSavingGlobalNote] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [workspaceCategory, setWorkspaceCategory] = useState<'all' | 'ai' | 'human'>('all');
 
   // Private note editing
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
@@ -1025,10 +1026,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     loadConversations(true);
   }, [loadConversations]);
 
+  const aiCount = useMemo(() => conversations.filter(c => c.status === 'ai_handling').length, [conversations]);
+  const humanCount = useMemo(() => conversations.filter(c => c.status !== 'ai_handling').length, [conversations]);
+  const totalCount = conversations.length;
+
   const filteredConversations = useMemo(() => {
     const searchQuery = userRole === 'admin' ? adminFilters.q : searchTerm;
     const filtered = conversations.filter((c) => {
+      if (workspaceCategory === 'ai' && c.status !== 'ai_handling') return false;
+      if (workspaceCategory === 'human' && c.status === 'ai_handling') return false;
+
       const matchesSearch =
+        (c.chat_id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.subject || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.customer_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (c.customer_email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1054,7 +1063,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       return timeOf(b) - timeOf(a);
     });
     return sorted;
-  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy, queueFilter]);
+  }, [conversations, searchTerm, adminFilters.q, userRole, sortBy, queueFilter, workspaceCategory]);
 
   // Layout dimensions
   const rightWidth = rightPanelOpen ? 330 : 56;
@@ -1098,6 +1107,45 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 </Badge>
               )}
             </div>
+          </div>
+
+          {/* AI vs Human Support Top-Level Filter Tabs */}
+          <div className="mt-2.5 flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setWorkspaceCategory('all')}
+              className={`flex-1 py-1 px-1.5 text-xs font-medium rounded transition-all text-center ${
+                workspaceCategory === 'all'
+                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              All ({totalCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceCategory('ai')}
+              className={`flex-1 py-1 px-1.5 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
+                workspaceCategory === 'ai'
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40'
+              }`}
+            >
+              <span>🤖 AI</span>
+              <span className={`px-1 py-0.2 rounded-full text-[10px] ${workspaceCategory === 'ai' ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300'}`}>{aiCount}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceCategory('human')}
+              className={`flex-1 py-1 px-1.5 text-xs font-medium rounded transition-all flex items-center justify-center gap-1 ${
+                workspaceCategory === 'human'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40'
+              }`}
+            >
+              <span>👤 Human</span>
+              <span className={`px-1 py-0.2 rounded-full text-[10px] ${workspaceCategory === 'human' ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300'}`}>{humanCount}</span>
+            </button>
           </div>
 
           <div className="mt-3 space-y-2">
@@ -1435,17 +1483,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
                 {/* Left Action Group: Take, Assign, Priority, Status */}
                 <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                  {selectedConversation.status === 'pending' && userRole === 'agent' && (
+                  {(selectedConversation.status === 'pending' || selectedConversation.status === 'ai_handling') && (
                     <Button
                       variant="primary"
                       size="sm"
                       onClick={handleTake}
-                      className="h-8 px-3 text-xs font-medium whitespace-nowrap shadow-sm"
+                      className="h-8 px-3 text-xs font-medium whitespace-nowrap shadow-sm bg-blue-600 hover:bg-blue-700 text-white inline-flex items-center"
+                      title={selectedConversation.status === 'ai_handling' ? 'Take over conversation from AI' : 'Assign to me'}
                     >
                       <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
-                      Take
+                      {selectedConversation.status === 'ai_handling' ? 'Take Over' : 'Take'}
                     </Button>
                   )}
 
@@ -1662,6 +1711,50 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       <span className="animate-pulse">Refreshing…</span>
                     </div>
                   )}
+
+                  {selectedConversation.status === 'ai_handling' && (
+                    <div className="rounded-lg border border-purple-200 bg-purple-50/90 p-3.5 dark:border-purple-800 dark:bg-purple-950/40 text-purple-900 dark:text-purple-100 flex items-center justify-between gap-3 shadow-xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-xl">🤖</span>
+                        <div>
+                          <p className="text-xs font-semibold">AI First Line Active</p>
+                          <p className="text-xs text-purple-700 dark:text-purple-300">
+                            The AI Assistant is currently handling this conversation. You can take over at any time.
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={handleTake}
+                        className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 h-8 flex-shrink-0 shadow-xs"
+                      >
+                        Take Conversation
+                      </Button>
+                    </div>
+                  )}
+
+                  {selectedConversation.status === 'pending' && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/90 p-3.5 dark:border-amber-800 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 flex items-center justify-between gap-3 shadow-xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-xl">⏳</span>
+                        <div>
+                          <p className="text-xs font-semibold">Pending Human Assignment</p>
+                          <p className="text-xs text-amber-700 dark:text-amber-300">
+                            Waiting for an available support agent with capacity.
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={handleTake}
+                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs px-3 py-1.5 h-8 flex-shrink-0 shadow-xs"
+                      >
+                        Assign to Me
+                      </Button>
+                    </div>
+                  )}
                   {messages.map((message) => {
                   const info = senderInfo(message);
                   const isSystemEvent =
@@ -1816,9 +1909,21 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                               {isAiMessage ? 'AI Assistant' : (selectedConversation?.customer_name || 'Customer')}
                             </span>
                             {isAiMessage && (
-                              <Badge variant="info" className="text-[10px]">
-                                AI
-                              </Badge>
+                              <>
+                                <Badge variant="info" className="text-[10px]">
+                                  AI
+                                </Badge>
+                                {message.ai_metadata?.model && (
+                                  <span className="text-[10px] text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/40 px-1.5 py-0.5 rounded font-mono">
+                                    {String(message.ai_metadata.model)}
+                                  </span>
+                                )}
+                                {message.ai_metadata?.confidence !== undefined && (
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                    {Math.round(Number(message.ai_metadata.confidence) * 100)}% conf
+                                  </span>
+                                )}
+                              </>
                             )}
                             <time className="text-[11px] text-slate-400 dark:text-slate-500">
                               {formatTimestamp(message.created_at)}

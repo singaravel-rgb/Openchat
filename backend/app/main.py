@@ -93,3 +93,25 @@ def root():
 def health_root():
     return {"status": "ok", "service": "OpenChat API"}
 
+
+@app.on_event("startup")
+async def startup_event():
+    import asyncio
+    async def _escalation_monitoring_loop():
+        from app.db.session import SessionLocal
+        from app.services.escalation_service import check_response_deadlines_and_escalate
+        while True:
+            try:
+                await asyncio.sleep(4)
+                db = SessionLocal()
+                try:
+                    check_response_deadlines_and_escalate(db)
+                finally:
+                    db.close()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    asyncio.create_task(_escalation_monitoring_loop())
+

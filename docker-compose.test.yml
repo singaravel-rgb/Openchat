@@ -73,6 +73,8 @@ services:
     container_name: openchat-celery-worker
     restart: unless-stopped
     command: ["celery", "-A", "app.core.celery_app:celery_app", "worker", "-l", "info", "--concurrency", "2"]
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,6 +107,8 @@ services:
     container_name: openchat-celery-beat
     restart: unless-stopped
     command: ["celery", "-A", "app.core.celery_app:celery_app", "beat", "-l", "info"]
+    healthcheck:
+      disable: true
     depends_on:
       redis:
         condition: service_healthy

@@ -65,6 +65,28 @@ def get_admin_stats(
     on_hold_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.ON_HOLD).count()
     waiting_on_customer_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.WAITING_ON_CUSTOMER).count()
 
+    ai_resolved_conversations = (
+        db.query(Conversation)
+        .filter(
+            Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]),
+            Conversation.assigned_agent_id.is_(None),
+        )
+        .count()
+    )
+    human_handled_conversations = (
+        db.query(Conversation)
+        .filter(
+            (Conversation.assigned_agent_id.isnot(None)) | (Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN, ConversationStatus.PENDING]))
+        )
+        .count()
+    )
+    missed_deadlines = (
+        db.query(Conversation)
+        .filter(Conversation.sla_response_breached == True)
+        .count()
+    )
+    escalation_rate = round((human_handled_conversations / total_conversations * 100), 1) if total_conversations > 0 else 0.0
+
     total_agents = db.query(User).filter(User.role == "agent", User.is_active == True).count()  # noqa: E712
     available_agents = (
         db.query(User)
@@ -96,6 +118,10 @@ def get_admin_stats(
         "conversations": {
             "total": total_conversations,
             "ai_handling": ai_handling_conversations,
+            "ai_resolved": ai_resolved_conversations,
+            "human_handled": human_handled_conversations,
+            "escalation_rate": escalation_rate,
+            "missed_deadlines": missed_deadlines,
             "pending": pending_conversations,
             "assigned": assigned_conversations,
             "open": assigned_conversations,
@@ -108,11 +134,20 @@ def get_admin_stats(
         "agents": {
             "total": total_agents,
             "available": available_agents,
-            "busy": total_agents - available_agents,
+            "busy": max(0, total_agents - available_agents),
         },
         "customers": {"total": total_customers},
         "avg_resolution_hours": avg_resolution_time,
     }
+
+
+@router.post("/escalation/check")
+def trigger_escalation_check(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    from app.services.escalation_service import check_response_deadlines_and_escalate
+    return check_response_deadlines_and_escalate(db)
 
 
 @router.get("/agents")

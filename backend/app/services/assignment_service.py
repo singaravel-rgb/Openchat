@@ -43,6 +43,36 @@ def get_available_agents(db: Session) -> list[User]:
     return [a[1] for a in available]
 
 
+def notify_unassigned_pending(db: Session, conversation: Conversation) -> None:
+    """Notify admins when a conversation cannot be assigned because all agents are at capacity or offline."""
+    chat_id_label = conversation.chat_id or f"#{conversation.id}"
+    existing = (
+        db.query(Notification)
+        .filter(
+            Notification.reference_id == conversation.id,
+            Notification.reference_type == "conversation",
+            Notification.type == NotificationType.SYSTEM,
+            Notification.title.like("%Unassigned Conversation%"),
+        )
+        .first()
+    )
+    if existing:
+        return
+
+    admins = db.query(User).filter(User.role.in_(["admin", "super_admin"]), User.is_active == True).all()
+    for admin in admins:
+        create_notification(
+            db,
+            user_id=admin.id,
+            type=NotificationType.SYSTEM,
+            title=f"Unassigned Conversation: {chat_id_label}",
+            message=f"Conversation {chat_id_label} is unassigned. All agents are currently at capacity or offline.",
+            reference_type="conversation",
+            reference_id=conversation.id,
+            priority=NotificationPriority.HIGH,
+        )
+
+
 def assign_conversation_to_agent(db: Session, conversation: Conversation) -> bool:
     """
     Assign conversation to the available agent with the lowest active conversation count.
@@ -58,6 +88,7 @@ def assign_conversation_to_agent(db: Session, conversation: Conversation) -> boo
     if not available_agents:
         conversation.status = ConversationStatus.PENDING
         conversation.assigned_agent_id = None
+        notify_unassigned_pending(db, conversation)
         return False
 
     agent = available_agents[0]
@@ -137,7 +168,7 @@ def reassign_conversation(db: Session, conversation: Conversation, new_agent_id:
                 return False
             active_count = db.query(func.count(Conversation.id)).filter(
                 Conversation.assigned_agent_id == new_agent.id,
-                Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),
+                Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN]),
             ).scalar() or 0
             if new_agent_profile and active_count < new_agent_profile.max_conversations:
                 conversation.assigned_agent_id = new_agent_id

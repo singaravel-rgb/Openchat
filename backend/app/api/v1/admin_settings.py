@@ -51,7 +51,15 @@ DEFAULT_SETTINGS = {
         "default_method": {"value": "round_robin", "description": "Default assignment method"},
         "auto_assign": {"value": True, "description": "Automatically assign incoming conversations"},
         "max_conversations_per_agent": {"value": 10, "description": "Max concurrent conversations per agent"},
+        "first_response_timeout_seconds": {"value": 5, "description": "Seconds before SLA warning alert is sent for unanswered customer message"},
+        "second_escalation_timeout_seconds": {"value": 30, "description": "Seconds before unanswered ticket is auto-escalated and reassigned"},
         "rules": {"value": [], "description": "Assignment rules (JSON array)"},
+    },
+    "escalation": {
+        "first_response_timeout_seconds": {"value": 5, "description": "First response warning deadline (seconds)"},
+        "second_escalation_timeout_seconds": {"value": 30, "description": "Second escalation & reassignment deadline (seconds)"},
+        "unassigned_alert_threshold_seconds": {"value": 10, "description": "Alert admins if unassigned in pending queue (seconds)"},
+        "auto_escalate_enabled": {"value": True, "description": "Enable automated reassignment on missed deadline"},
     },
 }
 

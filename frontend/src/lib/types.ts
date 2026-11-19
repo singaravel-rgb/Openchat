@@ -111,6 +111,7 @@ export interface Message {
   is_retracted?: boolean;
   retracted_at?: string | null;
   original_conversation_id?: number | null;
+  ai_metadata?: Record<string, any> | null;
 }
 
 export type MessageSenderType = 'customer' | 'agent' | 'ai' | 'system';
@@ -203,6 +204,10 @@ export interface AdminStats {
   conversations: {
     total: number;
     ai_handling: number;
+    ai_resolved?: number;
+    human_handled?: number;
+    escalation_rate?: number;
+    missed_deadlines?: number;
     pending: number;
     assigned: number;
     open?: number;
