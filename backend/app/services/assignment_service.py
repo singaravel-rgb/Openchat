@@ -11,19 +11,36 @@ from app.services.notification_service import create_notification
 
 
 def get_available_agents(db: Session) -> list[User]:
-    """Get all available agents with capacity for more conversations."""
-    return (
+    """Get all available agents with capacity for more conversations, sorted by lowest active chats."""
+    agents = (
         db.query(User)
         .join(AgentProfile, User.id == AgentProfile.user_id)
         .filter(
             User.role == "agent",
             User.is_active == True,  # noqa: E712
             AgentProfile.is_available == True,  # noqa: E712
-            AgentProfile.active_conversations < AgentProfile.max_conversations,
         )
-        .order_by(AgentProfile.active_conversations.asc(), AgentProfile.user_id.asc())
         .all()
     )
+    available: list[tuple[int, User]] = []
+    for agent in agents:
+        profile = agent.agent_profile
+        if not profile:
+            continue
+        real_active = (
+            db.query(Conversation)
+            .filter(
+                Conversation.assigned_agent_id == agent.id,
+                Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN]),
+            )
+            .count()
+        )
+        profile.active_conversations = real_active
+        if real_active < profile.max_conversations:
+            available.append((real_active, agent))
+    db.flush()
+    available.sort(key=lambda x: (x[0], x[1].id))
+    return [a[1] for a in available]
 
 
 def assign_conversation_to_agent(db: Session, conversation: Conversation) -> bool:
