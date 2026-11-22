@@ -248,7 +248,8 @@ def get_session_by_token(db: Session, token: str) -> WidgetSession | None:
     now = _utcnow()
     if sess.revoked_at is not None:
         return None
-    if sess.expires_at <= now:
+    exp = sess.expires_at if sess.expires_at.tzinfo else sess.expires_at.replace(tzinfo=timezone.utc)
+    if exp <= now:
         return None
     return sess
 

@@ -25,6 +25,11 @@ class AttachmentResponse(AttachmentBase):
     uploaded_by_id: Optional[int]
     file_path: str
     created_at: datetime
+    download_url: Optional[str] = None
+
+    def model_post_init(self, __context):
+        if not self.download_url and self.id:
+            self.download_url = f"/api/v1/attachments/{self.id}/download"
 
 
 class AttachmentUploadResponse(BaseModel):

@@ -39,8 +39,6 @@ class Conversation(Base):
 
     chat_id: Mapped[str] = mapped_column(
         String(50),
-        unique=True,
-        index=True,
         nullable=False,
     )
 
@@ -228,10 +226,6 @@ def set_conversation_chat_id(mapper, connection, target):
             seq_val = connection.execute(text("SELECT nextval('conversation_chat_id_seq')")).scalar()
             target.chat_id = f"OC-{year}-{int(seq_val):06d}"
         except Exception:
-            try:
-                res = connection.execute(text("SELECT COALESCE(MAX(id), 0) FROM conversations")).scalar() or 0
-                target.chat_id = f"OC-{year}-{(int(res) + 1):06d}"
-            except Exception:
-                import uuid
-                target.chat_id = f"OC-{year}-{uuid.uuid4().hex[:6].upper()}"
+            import uuid
+            target.chat_id = f"OC-{year}-{uuid.uuid4().hex[:6].upper()}"
 

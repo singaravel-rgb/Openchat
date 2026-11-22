@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status, Response, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.core.enums import ConversationStatus, MessageSenderType, MessageType
@@ -14,7 +15,7 @@ from app.models.user import User
 from app.schemas.widget import (
     WidgetPublicConfig, WidgetSessionCreate, WidgetSessionResponse,
     WidgetConversationCreate, WidgetConversation, WidgetConversationDetail,
-    WidgetMessageCreate, WidgetMessage,
+    WidgetMessageCreate, WidgetMessage, WidgetAttachment,
 )
 from app.services.widget_service import (
     get_or_create_widget_config, validate_widget_origin, get_or_create_guest_user,
@@ -227,16 +228,31 @@ def _conv_to_widget(c: Conversation, db: Session) -> WidgetConversation:
 
 
 def _msg_to_widget(m: Message) -> WidgetMessage:
-      # never expose internal notes/sender ids
-      return WidgetMessage(
-          id=m.id,
-          sender_type=m.sender_type,
-          message_type=m.message_type,
-          content=m.content,
-          created_at=m.created_at,
-          delivery_status=getattr(m, "delivery_status", "delivered"),
-          ai_metadata=getattr(m, "ai_metadata", None),
-      )
+    # never expose internal notes/sender ids
+    atts = []
+    if hasattr(m, "attachments") and m.attachments:
+        atts = [
+            WidgetAttachment(
+                id=a.id,
+                filename=a.filename,
+                original_filename=a.original_filename,
+                mime_type=a.mime_type,
+                file_size=a.file_size,
+                is_image=a.is_image,
+                download_url=f"/api/v1/widget/attachments/{a.id}/download",
+            )
+            for a in m.attachments
+        ]
+    return WidgetMessage(
+        id=m.id,
+        sender_type=m.sender_type,
+        message_type=m.message_type,
+        content=m.content,
+        created_at=m.created_at,
+        delivery_status=getattr(m, "delivery_status", "delivered"),
+        ai_metadata=getattr(m, "ai_metadata", None),
+        attachments=atts,
+    )
 
 
 @router.get("/conversations", response_model=list[WidgetConversation])
@@ -316,7 +332,13 @@ async def create_conversation(
 
     messages = (
         db.query(Message)
-        .filter(Message.conversation_id == conversation.id, Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
+        .filter(
+            Message.conversation_id == conversation.id,
+            Message.is_internal == False,
+            Message.is_retracted == False,
+            Message.message_type != MessageType.INTERNAL_NOTE,
+            Message.message_type != MessageType.SYSTEM_EVENT,
+        )
         .order_by(Message.created_at.asc(), Message.id.asc())
         .all()
     )
@@ -343,7 +365,13 @@ def get_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = (
         db.query(Message)
-        .filter(Message.conversation_id == conversation.id, Message.is_internal == False, Message.is_retracted == False)  # noqa: E712
+        .filter(
+            Message.conversation_id == conversation.id,
+            Message.is_internal == False,
+            Message.is_retracted == False,
+            Message.message_type != MessageType.INTERNAL_NOTE,
+            Message.message_type != MessageType.SYSTEM_EVENT,
+        )
         .order_by(Message.created_at.asc(), Message.id.asc())
         .all()
     )
@@ -376,8 +404,155 @@ async def send_message(
         from app.services.conversation_service import reopen_conversation
         reopen_conversation(db, conversation, user)
         db.flush()
+
+    content_clean = (data.content or "").strip()
+    if content_clean.lower() == "/help" or content_clean.lower().startswith("/help "):
+        cust_msg = Message(
+            conversation_id=conversation.id,
+            sender_id=user.id,
+            sender_type=MessageSenderType.CUSTOMER,
+            message_type=MessageType.TEXT,
+            content=content_clean,
+            is_internal=False,
+            delivery_status="delivered",
+            client_message_id=data.client_message_id,
+        )
+        db.add(cust_msg)
+        db.commit()
+
+        from app.models.knowledge import Article
+        from app.core.enums import ArticleStatus, ArticleVisibility
+        articles = (
+            db.query(Article)
+            .filter(Article.status == ArticleStatus.PUBLISHED, Article.visibility == ArticleVisibility.PUBLIC)
+            .order_by(Article.display_order.asc(), Article.id.asc())
+            .limit(4)
+            .all()
+        )
+        article_items = [
+            {"id": a.id, "title": a.title, "slug": a.slug, "excerpt": a.excerpt or (a.content[:120] + "...")}
+            for a in articles
+        ]
+
+        from app.services.bot_flow_service import get_active_bot_flow_data
+        flow_data = get_active_bot_flow_data(db)
+        quick_options = [
+            {"label": issue["title"], "value": issue["title"], "next_step_key": issue["start_step_key"]}
+            for issue in flow_data.get("issues", [])
+        ]
+
+        lines = ["Here are some helpful resources and assistance options:"]
+        if article_items:
+            lines.append("\nPopular Help Articles:")
+            for a in article_items:
+                lines.append(f"• {a['title']}")
+        lines.append("\nChoose a topic below or type your question:")
+
+        bot_msg = Message(
+            conversation_id=conversation.id,
+            sender_id=None,
+            sender_type=MessageSenderType.AI,
+            message_type=MessageType.TEXT,
+            content="\n".join(lines),
+            is_internal=False,
+            delivery_status="delivered",
+            ai_metadata={
+                "is_help_response": True,
+                "articles": article_items,
+                "options": quick_options,
+            },
+        )
+        db.add(bot_msg)
+        db.commit()
+        db.refresh(bot_msg)
+        return _msg_to_widget(bot_msg)
+
     msg = await process_customer_message(db, conversation, user, data.content, client_message_id=data.client_message_id, sync_ai=False)
     return _msg_to_widget(msg)
+
+
+@router.post("/conversations/{conversation_id}/attachments", response_model=WidgetMessage, status_code=status.HTTP_201_CREATED)
+async def upload_widget_attachment(
+    conversation_id: int,
+    file: UploadFile = File(...),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    x_widget_session: str | None = Header(None),
+):
+    rate_limit_for_request(request, "widget:attach:upload", 30, 60)
+    cfg = _cfg_or_503(db)
+    validate_widget_origin(cfg, request, require_when_configured=True)
+    _, user = require_widget_session(db, request, x_widget_session)
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id, Conversation.customer_id == user.id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.status == ConversationStatus.CLOSED:
+        raise HTTPException(status_code=409, detail="This conversation is closed")
+    if conversation.status == ConversationStatus.RESOLVED:
+        from app.services.conversation_service import reopen_conversation
+        reopen_conversation(db, conversation, user)
+        db.flush()
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size exceeds maximum allowed 10MB")
+
+    mime = file.content_type or "application/octet-stream"
+    if mime not in ("image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"):
+        raise HTTPException(status_code=400, detail="Only image files (PNG, JPG, JPEG, GIF, WebP) are supported")
+
+    msg = Message(
+        conversation_id=conversation.id,
+        sender_id=user.id,
+        sender_type=MessageSenderType.CUSTOMER,
+        message_type=MessageType.TEXT,
+        content=file.filename or "image.png",
+        is_internal=False,
+        delivery_status="delivered",
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+
+    from app.services.attachment_service import create_attachment
+    create_attachment(
+        db=db,
+        conversation_id=conversation.id,
+        file_content=content,
+        original_filename=file.filename or "image.png",
+        mime_type=mime,
+        uploaded_by_id=user.id,
+        message_id=msg.id,
+    )
+    db.refresh(msg)
+    return _msg_to_widget(msg)
+
+
+@router.get("/attachments/{attachment_id}/download")
+def download_widget_attachment(
+    attachment_id: int,
+    session: Optional[str] = Query(None),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    x_widget_session: str | None = Header(None),
+):
+    token = x_widget_session or session
+    _, user = require_widget_session(db, request, token)
+    from app.services.attachment_service import get_attachment_by_id, get_attachment_file_path
+    attachment = get_attachment_by_id(db, attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    conversation = db.query(Conversation).filter(Conversation.id == attachment.conversation_id, Conversation.customer_id == user.id).first()
+    if not conversation:
+        raise HTTPException(status_code=403, detail="Not authorized to access this attachment")
+    file_path = get_attachment_file_path(attachment)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return Response(
+        content=open(file_path, "rb").read(),
+        media_type=attachment.mime_type,
+        headers={"Content-Disposition": f'inline; filename="{attachment.original_filename}"'},
+    )
 
 
 @router.get("/bot-flow")
@@ -452,6 +627,19 @@ async def request_human(
 def embed_script(request: Request, db: Session = Depends(get_db)):
     # serve JS widget; allow cross-origin load (script tag). origin checks happen on API calls.
     base = str(request.base_url).rstrip('/')
+    candidates = [
+        Path(__file__).resolve().parents[4] / "widget" / "openchat-widget.js",
+        Path(__file__).resolve().parents[3] / "widget" / "openchat-widget.js",
+        Path("/app/widget/openchat-widget.js"),
+        Path("widget/openchat-widget.js"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return Response(
+                content=p.read_text(encoding="utf-8"),
+                media_type="application/javascript",
+                headers={"Cache-Control": "no-cache"},
+            )
     js = build_widget_js(base)
     return Response(content=js, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 

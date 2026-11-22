@@ -243,6 +243,50 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [confirmMergeExplicit, setConfirmMergeExplicit] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
 
+  // Composer expansion & floating message indicator
+  const [isComposerExpanded, setIsComposerExpanded] = useState(false);
+  const [hasUnseenNewMessage, setHasUnseenNewMessage] = useState(false);
+  const prevMessageCountRef = useRef(0);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+
+  // Export Modal state
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'csv' | 'xlsx'>('csv');
+  const [exportDateFrom, setExportDateFrom] = useState('');
+  const [exportDateTo, setExportDateTo] = useState('');
+  const [exportFields, setExportFields] = useState<string[]>([
+    'chat_id', 'subject', 'status', 'priority', 'customer_name', 'customer_email', 'assigned_agent_name', 'created_at', 'transcript'
+  ]);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Escape key global dismissal listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowSecondaryMenu(false);
+        setShowStatusMenu(false);
+        setShowCannedMenu(false);
+        setShowEmojiMenu(false);
+        setShowKnowledgeMenu(false);
+        setShowLinkModal(false);
+        setShowMergeModal(false);
+        setShowExportModal(false);
+        setPreviewImageUrl(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current) {
+      if (!isNearBottomRef.current && prevMessageCountRef.current > 0) {
+        setHasUnseenNewMessage(true);
+      }
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
+
   // Determine current queue from URL
   const currentQueueFromUrl = useMemo(() => {
     if (pathname === '/agent' || pathname === '/agent/inbox') return 'inbox';
@@ -637,6 +681,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         await attachmentApi.upload(selectedConversation.id, file);
         const detail = await agentApi.getConversation(selectedConversation.id);
         setAttachments(detail.attachments || []);
+        setMessages(detail.messages || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to upload attachment');
       } finally {
@@ -1028,6 +1073,51 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     loadConversations(true);
   }, [loadConversations]);
 
+  const handleDownloadExport = useCallback(async () => {
+    setIsExporting(true);
+    try {
+      const filters: Record<string, any> = {};
+      if (exportDateFrom) filters.date_from = exportDateFrom;
+      if (exportDateTo) filters.date_to = exportDateTo;
+
+      const payload = {
+        report_type: 'conversations',
+        format: exportFormat,
+        filters,
+        fields: exportFields,
+      };
+
+      const res = await fetch('/api/v1/admin/reports/export', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Export failed with HTTP ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `conversations_export_${new Date().toISOString().slice(0, 10)}.${exportFormat}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      setShowExportModal(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setIsExporting(false);
+    }
+  }, [exportFormat, exportDateFrom, exportDateTo, exportFields]);
+
   const aiCount = useMemo(() => conversations.filter(c => c.status === 'ai_handling').length, [conversations]);
   const meCount = useMemo(() => conversations.filter(c => c.assigned_agent_id === userId).length, [conversations, userId]);
   const otherAgentCount = useMemo(() => conversations.filter(c => c.assigned_agent_id && c.assigned_agent_id !== userId).length, [conversations, userId]);
@@ -1131,6 +1221,17 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                 </Badge>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowExportModal(true)}
+              className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 flex-shrink-0 ml-2"
+              title="Export conversations (CSV/Excel)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Export</span>
+            </button>
           </div>
 
           {/* Freshdesk-style View Dropdown */}
@@ -1584,7 +1685,9 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                     </Button>
 
                     {showStatusMenu && (
-                      <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setShowStatusMenu(false)} />
+                        <div className="absolute left-0 top-full z-40 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
                         <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                           Change Status
                         </div>
@@ -1627,7 +1730,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                           </button>
                         ))}
                       </div>
-                    )}
+                    </>
+                  )}
                   </div>
                 </div>
 
@@ -1782,7 +1886,11 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               onScroll={() => {
                 const el = messagesContainerRef.current;
                 if (el) {
-                  isNearBottomRef.current = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 150;
+                  const nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 150;
+                  isNearBottomRef.current = nearBottom;
+                  if (nearBottom) {
+                    setHasUnseenNewMessage(false);
+                  }
                 }
               }}
             >
@@ -2034,6 +2142,39 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                               </Badge>
                             )}
                             <div className="whitespace-pre-wrap">{cleanDemoPrefix(message.content)}</div>
+                            {message.attachments && message.attachments.length > 0 && (
+                              <div className="mt-2 space-y-2">
+                                {message.attachments.map((att) => {
+                                  const isImg = att.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(att.original_filename);
+                                  const url = att.download_url || `/api/v1/attachments/${att.id}/download`;
+                                  return (
+                                    <div key={att.id} className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
+                                      {isImg ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewImageUrl(url)}
+                                          className="block group text-left w-full"
+                                        >
+                                          <img
+                                            src={url}
+                                            alt={att.original_filename}
+                                            className="max-h-56 max-w-full rounded object-contain bg-slate-100 dark:bg-slate-900 hover:opacity-90 transition-opacity"
+                                            loading="lazy"
+                                          />
+                                          <span className="text-[11px] block truncate p-1 text-slate-600 dark:text-slate-300">
+                                            {att.original_filename}
+                                          </span>
+                                        </button>
+                                      ) : (
+                                        <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 hover:underline text-xs text-blue-600 dark:text-blue-400">
+                                          📎 {att.original_filename}
+                                        </a>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                             {message.original_conversation_id && message.original_conversation_id !== selectedConversation?.id && (
                               <span className="block mt-1 text-[10px] text-slate-400 italic">
                                 (merged from #{message.original_conversation_id})
@@ -2062,6 +2203,39 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                         </div>
                         <div className="rounded-lg rounded-tr-none bg-blue-600 text-white p-3 shadow-sm text-sm whitespace-pre-wrap">
                           {message.content}
+                          {message.attachments && message.attachments.length > 0 && (
+                            <div className="mt-2 space-y-2">
+                              {message.attachments.map((att) => {
+                                const isImg = att.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(att.original_filename);
+                                const url = att.download_url || `/api/v1/attachments/${att.id}/download`;
+                                return (
+                                  <div key={att.id} className="overflow-hidden rounded-md border border-blue-400/30 bg-blue-700/40">
+                                    {isImg ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPreviewImageUrl(url)}
+                                        className="block group text-left w-full"
+                                      >
+                                        <img
+                                          src={url}
+                                          alt={att.original_filename}
+                                          className="max-h-56 max-w-full rounded object-contain bg-black/10 hover:opacity-90 transition-opacity"
+                                          loading="lazy"
+                                        />
+                                        <span className="text-[11px] block truncate p-1 text-blue-100">
+                                          {att.original_filename}
+                                        </span>
+                                      </button>
+                                    ) : (
+                                      <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 hover:underline text-xs text-white">
+                                        📎 {att.original_filename}
+                                      </a>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                           {message.original_conversation_id && message.original_conversation_id !== selectedConversation?.id && (
                             <span className="block mt-1 text-[10px] text-blue-200 italic">
                               (merged from #{message.original_conversation_id})
@@ -2081,6 +2255,25 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
             )}
               <div ref={messagesEndRef} />
             </div>
+
+            {/* Floating New Message Indicator */}
+            {hasUnseenNewMessage && (
+              <div className="absolute bottom-28 right-8 z-30">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasUnseenNewMessage(false);
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 animate-bounce"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                  <span>New message</span>
+                </button>
+              </div>
+            )}
 
             {/* Requirement 6: 5-Second Undo Toast Banner */}
             {undoMessage && undoMessage.timeLeft > 0 && (
@@ -2232,30 +2425,48 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                         ))}
                       </div>
                     )}
-                    <textarea
-                      value={messageInput}
-                      onChange={(e) => {
-                        handleTextareaChange(e.target.value, 'message', e.target.selectionStart || 0);
-                      }}
-                      onKeyUp={(e) => {
-                        const target = e.target as HTMLTextAreaElement;
-                        handleTextareaChange(target.value, 'message', target.selectionStart || 0);
-                      }}
-                      placeholder={isInternal ? 'Write a private note (only agents can see this, type @ to mention)...' : 'Type a message...'}
-                      rows={2}
-                      className={`w-full px-4 py-2.5 text-sm border rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
-                        isInternal
-                          ? 'border-amber-300 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100'
-                          : 'border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
-                      }`}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendMessage();
-                        }
-                      }}
-                      disabled={isSending}
-                    />
+                    <div className="relative w-full">
+                      <textarea
+                        value={messageInput}
+                        onChange={(e) => {
+                          handleTextareaChange(e.target.value, 'message', e.target.selectionStart || 0);
+                        }}
+                        onKeyUp={(e) => {
+                          const target = e.target as HTMLTextAreaElement;
+                          handleTextareaChange(target.value, 'message', target.selectionStart || 0);
+                        }}
+                        placeholder={isInternal ? 'Write a private note (only agents can see this, type @ to mention)...' : 'Type a message...'}
+                        rows={isComposerExpanded ? 6 : 2}
+                        className={`w-full px-4 py-2.5 pr-8 text-sm border rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
+                          isInternal
+                            ? 'border-amber-300 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100'
+                            : 'border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                        }`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendMessage();
+                          }
+                        }}
+                        disabled={isSending}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsComposerExpanded((v) => !v)}
+                        className="absolute top-2.5 right-2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded"
+                        title={isComposerExpanded ? 'Collapse composer' : 'Expand composer'}
+                      >
+                        {isComposerExpanded ? (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <Button
@@ -3143,6 +3354,159 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   {isDeleting ? 'Deleting...' : 'Delete Permanently'}
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl max-w-lg w-full border border-slate-200 dark:border-slate-800">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>📊</span> Export Conversations
+              </h2>
+              <Button variant="ghost" size="sm" onClick={() => setShowExportModal(false)}>✕</Button>
+            </div>
+            <div className="p-4 space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Export Format
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="exportFormat"
+                      value="csv"
+                      checked={exportFormat === 'csv'}
+                      onChange={() => setExportFormat('csv')}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="font-medium text-slate-800 dark:text-slate-200">CSV (.csv)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="exportFormat"
+                      value="xlsx"
+                      checked={exportFormat === 'xlsx'}
+                      onChange={() => setExportFormat('xlsx')}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="font-medium text-slate-800 dark:text-slate-200">Excel (.xlsx)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Date From
+                  </label>
+                  <input
+                    type="date"
+                    value={exportDateFrom}
+                    onChange={(e) => setExportDateFrom(e.target.value)}
+                    className="w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Date To
+                  </label>
+                  <input
+                    type="date"
+                    value={exportDateTo}
+                    onChange={(e) => setExportDateTo(e.target.value)}
+                    className="w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Fields to Include
+                </label>
+                <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                  {[
+                    { id: 'chat_id', label: 'Chat ID' },
+                    { id: 'subject', label: 'Subject' },
+                    { id: 'status', label: 'Status' },
+                    { id: 'priority', label: 'Priority' },
+                    { id: 'customer_name', label: 'Customer Name' },
+                    { id: 'customer_email', label: 'Customer Email' },
+                    { id: 'assigned_agent_name', label: 'Assigned Agent' },
+                    { id: 'created_at', label: 'Created At' },
+                    { id: 'updated_at', label: 'Updated At' },
+                    { id: 'transcript', label: 'Full Transcript' },
+                  ].map((field) => (
+                    <label key={field.id} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={exportFields.includes(field.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setExportFields((prev) => [...prev, field.id]);
+                          } else {
+                            setExportFields((prev) => prev.filter((f) => f !== field.id));
+                          }
+                        }}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-slate-700 dark:text-slate-300">{field.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <Button variant="secondary" onClick={() => setShowExportModal(false)} disabled={isExporting}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleDownloadExport}
+                  disabled={isExporting || exportFields.length === 0}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {isExporting ? 'Generating Report...' : `Export ${exportFormat.toUpperCase()}`}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Size Image Preview Modal */}
+      {previewImageUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
+          onClick={() => setPreviewImageUrl(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={previewImageUrl}
+              alt="Attachment Preview"
+              className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
+            />
+            <div className="mt-3 flex gap-3">
+              <a
+                href={previewImageUrl}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded text-xs font-medium backdrop-blur transition-colors"
+              >
+                Open in new tab ↗
+              </a>
+              <button
+                type="button"
+                onClick={() => setPreviewImageUrl(null)}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium shadow"
+              >
+                Close (Esc)
+              </button>
             </div>
           </div>
         </div>

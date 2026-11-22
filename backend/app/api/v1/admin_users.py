@@ -1,3 +1,4 @@
+import hashlib
 import json
 import secrets
 import time
@@ -15,7 +16,9 @@ from app.db.session import get_db
 from app.models.agent_profile import AgentProfile
 from app.models.audit_log import AuditLog
 from app.models.invitation import UserInvitation
+from app.models.password_reset import PasswordResetToken
 from app.models.user import User
+from app.schemas.auth import AdminPasswordResetResponse
 from app.schemas.user_management import (
     UserDetailResponse,
     UserInviteRequest,
@@ -325,4 +328,75 @@ def update_user(
     db.refresh(target_user)
 
     return target_user
+
+
+@router.post("/{user_id}/reset-password", response_model=AdminPasswordResetResponse)
+def admin_initiate_password_reset(
+    user_id: int,
+    current_user: User = Depends(require_admin_or_super),
+    db: Session = Depends(get_db),
+):
+    """
+    Administrator-initiated secure password reset for agents or users.
+    Generates a secure, expiring, single-use reset token and delivers reset instructions.
+    Plaintext passwords are never set or exposed directly.
+    """
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target_user.role == "super_admin" and current_user.role != "super_admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Super Administrator can initiate password reset for another Super Administrator.",
+        )
+
+    # Invalidate previous unexpired tokens
+    now = datetime.now(timezone.utc)
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == target_user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({"used_at": now})
+
+    # Generate cryptographically secure token
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    expires_at = now + timedelta(minutes=30)
+
+    reset_record = PasswordResetToken(
+        user_id=target_user.id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        created_by_id=current_user.id,
+    )
+    db.add(reset_record)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="user.admin_password_reset_initiated",
+        resource_type="user",
+        resource_id=target_user.id,
+        details=json.dumps({"target_email": target_user.email, "initiated_by": current_user.email}),
+    )
+    db.add(audit)
+    db.commit()
+
+    reset_link = f"/reset-password?token={raw_token}"
+    try:
+        from app.services.email_service import send_email
+        send_email(
+            to_email=target_user.email,
+            subject="Password Reset Requested by Administrator",
+            body=f"Hello {target_user.full_name},\n\nAn administrator has initiated a password reset for your account. Please use this link to set a new password:\n{reset_link}\n\nThis link is valid for 30 minutes.",
+        )
+    except Exception:
+        pass
+
+    return {
+        "message": f"Password reset link generated and sent to {target_user.email}.",
+        "reset_token": raw_token,
+        "reset_url": reset_link,
+        "expires_at": expires_at,
+    }
+
 

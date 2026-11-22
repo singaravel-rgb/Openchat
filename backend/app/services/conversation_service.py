@@ -46,6 +46,8 @@ def list_conversations_query(
     queue: Optional[str] = None,
     agent_id: Optional[int] = None,
     customer_id: Optional[int] = None,
+    handling: Optional[str] = None,
+    filter_type: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
@@ -171,6 +173,39 @@ def list_conversations_query(
                 ConversationStatus.ON_HOLD,
             ])
         )
+
+    if handling:
+        h = handling.lower().strip()
+        if h == "human":
+            query = query.filter(
+                or_(
+                    Conversation.assigned_agent_id.isnot(None),
+                    Conversation.status.in_([
+                        ConversationStatus.OPEN,
+                        ConversationStatus.ASSIGNED,
+                        ConversationStatus.WAITING_ON_CUSTOMER,
+                        ConversationStatus.ON_HOLD,
+                    ])
+                )
+            )
+        elif h == "ai":
+            query = query.filter(
+                Conversation.assigned_agent_id.is_(None),
+                Conversation.status == ConversationStatus.AI_HANDLING,
+            )
+
+    if filter_type:
+        ft = filter_type.lower().strip()
+        if ft in ("unanswered", "waiting_response"):
+            query = query.filter(
+                Conversation.status.in_([
+                    ConversationStatus.OPEN,
+                    ConversationStatus.ASSIGNED,
+                    ConversationStatus.PENDING,
+                ])
+            )
+        elif ft in ("sla_breached", "missed_deadlines", "breached"):
+            query = query.filter(Conversation.sla_response_breached == True)
 
     if q:
         like = f"%{q.strip()}%"

@@ -21,6 +21,8 @@ export default function AdminAgentsPage() {
   const [newAgentPassword, setNewAgentPassword] = useState('');
   const [newAgentMax, setNewAgentMax] = useState(5);
   const [isCreating, setIsCreating] = useState(false);
+  const [resetModalData, setResetModalData] = useState<{ agentName: string; resetUrl: string; copied: boolean } | null>(null);
+  const [resettingId, setResettingId] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -63,6 +65,21 @@ export default function AdminAgentsPage() {
       setEditingAgent(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update max conversations');
+    }
+  };
+
+  const handleResetPassword = async (agent: AdminAgent) => {
+    setResettingId(agent.id);
+    setError(null);
+    try {
+      const res = await adminApi.resetUserPassword(agent.id);
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const fullUrl = res.reset_url || `${origin}/reset-password?token=${res.reset_token}`;
+      setResetModalData({ agentName: agent.full_name, resetUrl: fullUrl, copied: false });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate reset link');
+    } finally {
+      setResettingId(null);
     }
   };
 
@@ -200,6 +217,15 @@ export default function AdminAgentsPage() {
                           <Button variant="outline" size="sm" onClick={() => handleEditMaxConversations(agent)}>
                             Max: {agent.max_conversations}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/20"
+                            onClick={() => handleResetPassword(agent)}
+                            disabled={resettingId === agent.id}
+                          >
+                            {resettingId === agent.id ? 'Generating...' : 'Reset Password'}
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -295,6 +321,53 @@ export default function AdminAgentsPage() {
                   </Button>
                 </div>
               </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Admin Password Reset Link Modal */}
+      {resetModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-lg shadow-xl">
+            <CardHeader>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Password Reset Link Generated
+              </h3>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                A secure single-use password reset link for <strong>{resetModalData.agentName}</strong> has been generated (valid for 30 minutes).
+              </p>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Reset URL
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={resetModalData.resetUrl}
+                    className="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-mono text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(resetModalData.resetUrl);
+                      setResetModalData((prev) => (prev ? { ...prev, copied: true } : null));
+                    }}
+                  >
+                    {resetModalData.copied ? 'Copied!' : 'Copy Link'}
+                  </Button>
+                </div>
+              </div>
+              <div className="flex justify-end pt-2">
+                <Button variant="primary" onClick={() => setResetModalData(null)}>
+                  Done
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>

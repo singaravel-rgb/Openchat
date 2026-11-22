@@ -116,7 +116,7 @@ def assign_conversation_to_agent(db: Session, conversation: Conversation) -> boo
         sender_type=MessageSenderType.SYSTEM,
         message_type=MessageType.SYSTEM_EVENT,
         content=f"Conversation assigned to {agent.full_name}",
-        is_internal=False,
+        is_internal=True,
         delivery_status="delivered",
     )
     db.add(system_message)
@@ -189,7 +189,7 @@ def reassign_conversation(db: Session, conversation: Conversation, new_agent_id:
                     sender_type=MessageSenderType.SYSTEM,
                     message_type=MessageType.SYSTEM_EVENT,
                     content=f"Conversation reassigned to {new_agent.full_name}",
-                    is_internal=False,
+                    is_internal=True,
                     delivery_status="delivered",
                 )
                 db.add(system_message)

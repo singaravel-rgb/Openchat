@@ -184,11 +184,11 @@ export default function AdminDashboardPage() {
             </Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Link href="/admin/conversations" className="block group">
+            <Link href="/admin/conversations?status=open" className="block group">
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Conversations</p>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{stats?.conversations.total || 0}</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Unresolved</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{stats?.conversations.total_unresolved ?? stats?.conversations.total ?? 0}</p>
                 </CardContent>
               </Card>
             </Link>
@@ -202,7 +202,7 @@ export default function AdminDashboardPage() {
               </Card>
             </Link>
 
-            <Link href="/admin/conversations" className="block group">
+            <Link href="/admin/conversations?handling=human" className="block group">
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Human Handling</p>
@@ -302,17 +302,17 @@ export default function AdminDashboardPage() {
               </Card>
             </Link>
 
-            <Link href="/admin/conversations?status=waiting_on_customer" className="block group">
+            <Link href="/admin/conversations?filter=unanswered" className="block group">
               <Card className="hover:shadow-md transition-shadow border-slate-200 dark:border-slate-800 h-full">
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Unanswered Conversations</p>
                   <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{unansweredTotal}</p>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Conversations requiring next response</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Conversations requiring agent response</p>
                 </CardContent>
               </Card>
             </Link>
 
-            <Link href="/admin/conversations" className="block group">
+            <Link href="/admin/conversations?filter=sla_breached" className="block group">
               <Card className="hover:shadow-md transition-shadow border-slate-200 dark:border-slate-800 h-full">
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Missed Response Deadlines</p>

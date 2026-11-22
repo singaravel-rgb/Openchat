@@ -49,7 +49,9 @@
     info: null,
     poll: null,
     retryCount: 0,
-    offline: !navigator.onLine
+    offline: !navigator.onLine,
+    activeTab: 'chat',
+    selectedAttachment: null
   };
   window.__openchatState = state;
 
@@ -338,11 +340,62 @@
     }
   }
 
+  async function uploadAttachment(file){
+    if (!state.detail || !file) return null;
+    var fd = new FormData();
+    fd.append('file', file);
+    var url = API_BASE + '/conversations/' + state.detail.id + '/attachments';
+    var res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-widget-session': state.sessionToken || '',
+      },
+      body: fd,
+    });
+    if (!res.ok) {
+      var err = await res.json().catch(function(){ return {}; });
+      throw new Error(err.detail || 'Attachment upload failed');
+    }
+    return await res.json();
+  }
+
+  async function reopenConversation(convId){
+    try {
+      await api('/conversations/' + convId + '/reopen', { method: 'POST' });
+      state.activeTab = 'chat';
+      await loadDetail(convId);
+      await loadConversations();
+      render();
+    } catch(e) {
+      logError('reopenConversation', e);
+      setError(e.message || 'Failed to reopen conversation');
+    }
+  }
+
   async function sendMessage(explicitContent, explicitClientId){
     if (!state.detail || state.sending) return;
     var ta = $('#ocw-text');
     var content = (explicitContent !== undefined && explicitContent !== null) ? String(explicitContent).trim() : (ta ? ta.value.trim() : '');
-    if (!content) return;
+    var hasAttachment = Boolean(state.selectedAttachment);
+    if (!content && !hasAttachment) return;
+
+    if (hasAttachment) {
+      var fileToUpload = state.selectedAttachment.file;
+      state.selectedAttachment = null;
+      try {
+        await uploadAttachment(fileToUpload);
+        await loadDetail(state.detail.id);
+      } catch(err) {
+        logError('uploadAttachment', err);
+        setError(err.message || 'Failed to upload attachment');
+        render();
+      }
+      if (!content) {
+        state.sending = false;
+        render();
+        return;
+      }
+    }
 
     var clientId = explicitClientId || ('client_' + nowId());
     state.sending = true;
@@ -510,6 +563,10 @@
     if (state.open) {
       panel += '<div class="ocw-panel ' + pos + '">';
       panel += '<div class="ocw-header" style="background:' + esc(primary) + '"><div><div class="ocw-title">' + esc(cfg.widget_title || cfg.brand_name || 'Support') + '</div><div class="ocw-sub">' + esc(cfg.greeting_text || 'We are here to help') + '</div></div><div class="ocw-topbar">' + (state.detail ? '<button class="ocw-iconbtn" id="ocw-back" title="Back">←</button>' : '') + '<button class="ocw-iconbtn" id="ocw-min" title="Minimize">_</button><button class="ocw-iconbtn" id="ocw-close" title="Close">×</button></div></div>';
+      panel += '<div class="ocw-tabs" style="display:flex;gap:4px;padding:6px 12px;background:' + esc(primary) + ';filter:brightness(0.93);border-bottom:1px solid rgba(0,0,0,0.06);">';
+      panel += '<button type="button" class="ocw-tab-btn" id="ocw-tab-chat" style="flex:1;padding:5px 8px;border-radius:6px;border:none;font-size:12px;font-weight:600;cursor:pointer;' + (state.activeTab !== 'chats' ? 'background:#fff;color:' + esc(primary) + ';box-shadow:0 1px 2px rgba(0,0,0,0.1);' : 'background:rgba(255,255,255,0.15);color:#fff;') + '">💬 Chat</button>';
+      panel += '<button type="button" class="ocw-tab-btn" id="ocw-tab-chats" style="flex:1;padding:5px 8px;border-radius:6px;border:none;font-size:12px;font-weight:600;cursor:pointer;' + (state.activeTab === 'chats' ? 'background:#fff;color:' + esc(primary) + ';box-shadow:0 1px 2px rgba(0,0,0,0.1);' : 'background:rgba(255,255,255,0.15);color:#fff;') + '">📋 My Chats (' + (state.conversations ? state.conversations.length : 0) + ')</button>';
+      panel += '</div>';
       if (state.minimized) {
         panel += '<div class="ocw-body"><div class="ocw-empty">Chat minimized. Click below or launcher to restore.</div></div></div>';
       } else {
@@ -517,7 +574,35 @@
         if (state.error) panel += '<div class="ocw-error">' + esc(state.error) + '</div>';
         if (state.info) panel += '<div class="ocw-error" style="background:#ecfeff;color:#155e75;border-color:#a5f3fc">' + esc(state.info) + '</div>';
         if (state.offline) panel += '<div class="ocw-error">You appear to be offline. Messages will send when connection is restored.</div>';
-        if (!state.detail) {
+        if (state.activeTab === 'chats') {
+          panel += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="font-size:13px;font-weight:600;color:#1e293b;">Your Conversations</span><button type="button" id="ocw-new-chat-btn" style="background:' + esc(primary) + ';color:#fff;border:none;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">+ New Chat</button></div>';
+          if (state.conversations && state.conversations.length) {
+            panel += '<div class="ocw-list" style="display:flex;flex-direction:column;gap:8px;">';
+            state.conversations.forEach(function(c){
+              var isResolved = c.status === 'resolved' || c.status === 'closed';
+              var statusBg = isResolved ? '#dcfce7;color:#166534' : (c.status === 'open' ? '#dbeafe;color:#1e40af' : '#fef3c7;color:#92400e');
+              var chatIdBadge = c.chat_id ? '<span style="font-family:monospace;font-size:10px;padding:2px 6px;border-radius:4px;background:#f1f5f9;color:#475569;font-weight:600;">' + esc(c.chat_id) + '</span>' : '';
+              var statusBadge = '<span style="font-size:10px;padding:2px 7px;border-radius:9999px;font-weight:600;background:' + statusBg + ';">' + esc(c.status) + '</span>';
+
+              panel += '<div class="ocw-chat-item" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;">';
+              panel += '<div style="display:flex;justify-content:space-between;align-items:center;">' + chatIdBadge + statusBadge + '</div>';
+              panel += '<div style="font-weight:600;font-size:12px;color:#1e293b;cursor:pointer;" class="ocw-conv-open" data-id="' + c.id + '">' + esc(c.subject || 'Support Conversation') + '</div>';
+              panel += '<div style="font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" class="ocw-conv-open" data-id="' + c.id + '">' + esc(c.last_message || 'No messages yet') + '</div>';
+              panel += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;border-top:1px solid #f8fafc;padding-top:4px;">';
+              panel += '<span style="font-size:10px;color:#94a3b8;">' + fmtTime(c.updated_at || c.created_at) + '</span>';
+              if (isResolved) {
+                panel += '<button type="button" class="ocw-reopen-btn" data-id="' + c.id + '" style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:4px;padding:3px 8px;font-size:10px;font-weight:600;cursor:pointer;">Reopen Chat</button>';
+              } else {
+                panel += '<button type="button" class="ocw-conv-open" data-id="' + c.id + '" style="background:none;border:none;font-size:11px;color:' + esc(primary) + ';font-weight:600;cursor:pointer;padding:0;">Continue →</button>';
+              }
+              panel += '</div>';
+              panel += '</div>';
+            });
+            panel += '</div>';
+          } else {
+            panel += '<div class="ocw-empty">No previous conversations.</div>';
+          }
+        } else if (!state.detail) {
           panel += '<div style="margin-bottom:12px;color:#334155;font-size:13px">' + esc(cfg.welcome_message || (cfg.bot_flow && cfg.bot_flow.initial_greeting) || 'Hello! Welcome to OpenChat Support. How can we help you today?') + '</div>';
           panel += '<button class="ocw-btn ocw-btn-primary" id="ocw-start" style="background:' + esc(primary) + ';width:100%">' + (state.loading ? 'Connecting...' : 'Start new conversation') + '</button>';
           panel += '<div style="margin:14px 0 6px;font-size:12px;color:#475569;font-weight:600">Quick Assistance & Topics</div>';
@@ -579,7 +664,16 @@
               }
 
               var senderLabel = (m.sender_type === 'customer') ? 'You' : 'OpenChat Support';
-              panel += '<div class="' + cls + '"><div class="ocw-bubble" style="' + bubbleStyle + '">' + content + '</div><div class="ocw-meta">' + senderLabel + ' • ' + fmtTime(m.created_at) + statusBadge + '</div></div>';
+              var attachHtml = '';
+              if (m.attachments && m.attachments.length) {
+                attachHtml += '<div class="ocw-bubble-attachments" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">';
+                m.attachments.forEach(function(att){
+                  var dlUrl = att.download_url || (API_BASE + '/attachments/' + att.id + '/download?session=' + encodeURIComponent(state.sessionToken || ''));
+                  attachHtml += '<a href="' + dlUrl + '" target="_blank" rel="noopener noreferrer" style="display:block;border-radius:6px;overflow:hidden;border:1px solid rgba(0,0,0,0.1);"><img src="' + dlUrl + '" alt="' + esc(att.original_filename) + '" style="max-width:100%;max-height:160px;display:block;object-fit:contain;background:rgba(0,0,0,0.03);"/><span style="display:block;font-size:10px;padding:2px 4px;opacity:0.8;text-align:left;">' + esc(att.original_filename) + '</span></a>';
+                });
+                attachHtml += '</div>';
+              }
+              panel += '<div class="' + cls + '"><div class="ocw-bubble" style="' + bubbleStyle + '">' + content + attachHtml + '</div><div class="ocw-meta">' + senderLabel + ' • ' + fmtTime(m.created_at) + statusBadge + '</div></div>';
 
               // Contextual multi-level bot flow options
               if (m.sender_type !== 'customer' && m.ai_metadata && m.ai_metadata.options && m.ai_metadata.options.length) {
@@ -596,7 +690,21 @@
             panel += '<div class="ocw-empty">Send a message to begin chatting.</div>';
           }
           panel += '</div>';
-          panel += '<div class="ocw-footer"><textarea id="ocw-text" class="ocw-input" placeholder="Type a message…"></textarea><div class="ocw-row"><button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:' + esc(primary) + (state.sending ? ';opacity:0.6;cursor:not-allowed;' : '') + ';width:100%"' + (state.sending ? ' disabled' : '') + '>' + (state.sending ? 'Sending...' : 'Send') + '</button></div></div>';
+          panel += '<div class="ocw-footer">';
+          if (state.selectedAttachment) {
+            panel += '<div class="ocw-attach-preview" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f1f5f9;border-radius:8px;margin-bottom:8px;border:1px solid #e2e8f0;">';
+            panel += '<img src="' + state.selectedAttachment.previewUrl + '" style="height:36px;width:36px;object-fit:cover;border-radius:4px;border:1px solid #cbd5e1;"/>';
+            panel += '<span style="flex:1;font-size:11px;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;">' + esc(state.selectedAttachment.file.name) + '</span>';
+            panel += '<button type="button" id="ocw-remove-attach" style="background:none;border:none;cursor:pointer;font-size:14px;color:#ef4444;padding:2px 6px;" title="Remove image">✕</button>';
+            panel += '</div>';
+          }
+          panel += '<div style="display:flex;gap:6px;align-items:flex-end;">';
+          panel += '<button type="button" id="ocw-attach-btn" title="Attach image (PNG, JPG, max 10MB)" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:14px;color:#475569;height:42px;display:flex;align-items:center;justify-content:center;">📎</button>';
+          panel += '<input type="file" id="ocw-file-input" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" style="display:none;"/>';
+          panel += '<textarea id="ocw-text" class="ocw-input" placeholder="Type a message or /help…" style="flex:1;min-height:42px;height:42px;"></textarea>';
+          panel += '<button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:' + esc(primary) + (state.sending ? ';opacity:0.6;cursor:not-allowed;' : '') + ';height:42px;padding:0 14px;font-weight:600;"' + (state.sending ? ' disabled' : '') + '>' + (state.sending ? '...' : 'Send') + '</button>';
+          panel += '</div>';
+          panel += '</div>';
         }
         panel += '</div>';
       }
@@ -683,6 +791,65 @@
         });
       };
     }
+    var tabChat = $('#ocw-tab-chat');
+    if (tabChat) {
+      tabChat.onclick = function(){ state.activeTab = 'chat'; render(); };
+    }
+    var tabChats = $('#ocw-tab-chats');
+    if (tabChats) {
+      tabChats.onclick = function(){ state.activeTab = 'chats'; loadConversations().then(render); };
+    }
+    var newChatBtn = $('#ocw-new-chat-btn');
+    if (newChatBtn) {
+      newChatBtn.onclick = function(){
+        state.activeTab = 'chat';
+        state.detail = null;
+        state.activeId = null;
+        startConversation();
+      };
+    }
+    var attachBtn = $('#ocw-attach-btn');
+    var fileInput = $('#ocw-file-input');
+    if (attachBtn && fileInput) {
+      attachBtn.onclick = function(){ fileInput.click(); };
+      fileInput.onchange = function(e){
+        var file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        if (file.size > 10 * 1024 * 1024) {
+          setError('Image exceeds maximum allowed size of 10MB.');
+          return;
+        }
+        var previewUrl = URL.createObjectURL(file);
+        state.selectedAttachment = { file: file, previewUrl: previewUrl };
+        render();
+      };
+    }
+    var removeAttachBtn = $('#ocw-remove-attach');
+    if (removeAttachBtn) {
+      removeAttachBtn.onclick = function(){
+        state.selectedAttachment = null;
+        render();
+      };
+    }
+    var reopenBtns = $$('.ocw-reopen-btn');
+    reopenBtns.forEach(function(btn){
+      btn.onclick = function(e){
+        e.stopPropagation();
+        var cid = parseInt(btn.getAttribute('data-id'), 10);
+        reopenConversation(cid);
+      };
+    });
+    var convOpenLinks = $$('.ocw-conv-open');
+    convOpenLinks.forEach(function(el){
+      el.onclick = function(e){
+        e.stopPropagation();
+        var cid = parseInt(el.getAttribute('data-id'), 10);
+        state.activeTab = 'chat';
+        loadDetail(cid);
+      };
+    });
+
     var sendBtn = $('#ocw-send');
     if (sendBtn) {
       sendBtn.onclick = function(){

@@ -22,4 +22,20 @@ Thumbs.db
 *.tfplan
 *.dump
 crash.log
+*.db
+scratch/
+uploads/
+ssm_*.json
+*.png
+/capture_*.py
+/check_*.py
+/deploy_*.py
+/find_*.py
+/run_*.py
+/test_*.py
+/verify_*.py
+/scripts/
+
+
+
 

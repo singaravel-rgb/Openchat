@@ -75,13 +75,25 @@ def require_agent(current_user: User = Depends(require_roles("agent", "admin", "
 def list_agent_conversations(
     status_filter: Optional[str] = Query(None, alias="status"),
     queue: Optional[str] = Query(None),
+    handling: Optional[str] = Query(None),
+    filter_type: Optional[str] = Query(None, alias="filter"),
     q: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_agent),
 ):
-    items, _ = list_conversations_query(db, viewer=current_user, status_filter=status_filter, queue=queue, q=q, limit=limit, offset=offset)
+    items, _ = list_conversations_query(
+        db,
+        viewer=current_user,
+        status_filter=status_filter,
+        queue=queue,
+        handling=handling,
+        filter_type=filter_type,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
     return [build_conversation_list_item(db, c, viewer=current_user) for c in items]
 
 

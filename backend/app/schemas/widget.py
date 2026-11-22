@@ -92,6 +92,16 @@ class WidgetConversationCreate(BaseModel):
     client_message_id: Optional[str] = Field(default=None, max_length=100)
 
 
+class WidgetAttachment(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    mime_type: str
+    file_size: int
+    is_image: bool = False
+    download_url: str
+
+
 class WidgetMessage(BaseModel):
     id: int
     sender_type: str
@@ -100,6 +110,7 @@ class WidgetMessage(BaseModel):
     created_at: datetime
     delivery_status: Optional[str] = "delivered"
     ai_metadata: Optional[dict] = None
+    attachments: Optional[List[WidgetAttachment]] = Field(default_factory=list)
 
 
 class WidgetConversation(BaseModel):

@@ -168,7 +168,7 @@ def check_response_deadlines_and_escalate(db: Session) -> dict[str, Any]:
                         sender_type=MessageSenderType.SYSTEM,
                         message_type=MessageType.SYSTEM_EVENT,
                         content=f"Response deadline ({second_threshold}s) exceeded. Automatically escalated and reassigned from {old_agent.full_name if old_agent else 'previous agent'} to {new_agent.full_name}.",
-                        is_internal=False,
+                        is_internal=True,
                         delivery_status="delivered",
                     )
                     db.add(sys_msg)
@@ -208,7 +208,7 @@ def check_response_deadlines_and_escalate(db: Session) -> dict[str, Any]:
                         sender_type=MessageSenderType.SYSTEM,
                         message_type=MessageType.SYSTEM_EVENT,
                         content=f"Response deadline ({second_threshold}s) exceeded. No other available agents; ticket moved to Pending queue.",
-                        is_internal=False,
+                        is_internal=True,
                         delivery_status="delivered",
                     )
                     db.add(sys_msg)

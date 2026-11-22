@@ -1,8 +1,10 @@
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Any, Union
 import csv
 import io
 import json
+import zipfile
+from xml.sax.saxutils import escape
 
 from sqlalchemy import func, and_, or_, case
 from sqlalchemy.orm import Session
@@ -249,6 +251,51 @@ def get_knowledge_base_metrics(db: Session) -> dict:
     }
 
 
+def generate_xlsx(headers: list[str], rows: list[list[Any]], sheet_name: str = "Report") -> bytes:
+    """Generate a clean, valid Office OpenXML .xlsx spreadsheet without third-party dependencies."""
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""")
+        z.writestr("_rels/.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""")
+        z.writestr("xl/_rels/workbook.xml.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>""")
+        z.writestr("xl/workbook.xml", f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="{sheet_name}" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>""")
+        sheet_rows = []
+        all_data = [headers] + rows
+        for r_idx, row in enumerate(all_data, 1):
+            cells = []
+            for c_idx, val in enumerate(row, 1):
+                col_letter = chr(64 + c_idx) if c_idx <= 26 else f"{chr(64 + (c_idx - 1) // 26)}{chr(65 + (c_idx - 1) % 26)}"
+                ref = f"{col_letter}{r_idx}"
+                s_val = escape(str(val if val is not None else ""))
+                cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{s_val}</t></is></c>')
+            sheet_rows.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+        sheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    {"".join(sheet_rows)}
+  </sheetData>
+</worksheet>"""
+        z.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return bio.getvalue()
+
+
 def export_report(
     db: Session,
     report_type: str,
@@ -256,10 +303,17 @@ def export_report(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     agent_id: Optional[int] = None,
-) -> tuple[str, str]:
-    """Export report to CSV or JSON. Returns (content, filename)."""
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    
+    fields: Optional[list[str]] = None,
+    user_role: str = "admin",
+) -> tuple[Union[str, bytes], str, str]:
+    """Export report to CSV, XLSX, or JSON. Returns (content, filename, media_type)."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    norm_format = (format or "csv").lower().strip()
+    if norm_format in ("xlsx", "excel"):
+        norm_format = "xlsx"
+    elif norm_format not in ("csv", "json"):
+        norm_format = "csv"
+
     if report_type == "conversations":
         query = db.query(Conversation)
         if start_date:
@@ -268,142 +322,147 @@ def export_report(
             query = query.filter(Conversation.created_at <= end_date)
         if agent_id:
             query = query.filter(Conversation.assigned_agent_id == agent_id)
-        
-        conversations = query.all()
-        
-        if format == "csv":
+
+        conversations = query.order_by(Conversation.created_at.desc()).all()
+
+        field_definitions = {
+            "chat_id": ("Chat ID", lambda c: c.chat_id or f"CHT-{c.id}"),
+            "id": ("ID", lambda c: c.id),
+            "subject": ("Subject", lambda c: c.subject or "Support Request"),
+            "status": ("Status", lambda c: c.status),
+            "priority": ("Priority", lambda c: getattr(c, "priority", "normal") or "normal"),
+            "channel": ("Channel", lambda c: c.channel or "widget"),
+            "customer_name": ("Customer Name", lambda c: c.customer.full_name if c.customer else "Guest"),
+            "customer_email": ("Customer Email", lambda c: c.customer.email if c.customer else ""),
+            "agent_name": ("Agent Name", lambda c: c.assigned_agent.full_name if c.assigned_agent else "Unassigned"),
+            "created_at": ("Created At", lambda c: c.created_at.isoformat() if c.created_at else ""),
+            "updated_at": ("Updated At", lambda c: c.updated_at.isoformat() if c.updated_at else ""),
+            "resolved_at": ("Resolved At", lambda c: c.resolved_at.isoformat() if getattr(c, "resolved_at", None) else ""),
+            "first_response_at": ("First Response At", lambda c: c.first_response_at.isoformat() if getattr(c, "first_response_at", None) else ""),
+            "sla_response_breached": ("SLA Response Breached", lambda c: "Yes" if getattr(c, "sla_response_breached", False) else "No"),
+            "sla_resolution_breached": ("SLA Resolution Breached", lambda c: "Yes" if getattr(c, "sla_resolution_breached", False) else "No"),
+            "messages_summary": ("Messages Summary", lambda c: " | ".join(f"[{m.sender_type.upper()}] {m.content}" for m in (c.messages or []) if not (m.is_internal and user_role not in ("admin", "super_admin")))),
+        }
+
+        active_fields = []
+        if fields:
+            for f in fields:
+                if f in field_definitions:
+                    active_fields.append(f)
+        if not active_fields:
+            active_fields = [
+                "chat_id", "subject", "status", "priority", "channel",
+                "customer_name", "customer_email", "agent_name",
+                "created_at", "updated_at", "resolved_at",
+                "sla_response_breached", "sla_resolution_breached"
+            ]
+
+        headers = [field_definitions[k][0] for k in active_fields]
+        rows = [
+            [field_definitions[k][1](conv) for k in active_fields]
+            for conv in conversations
+        ]
+
+        if norm_format == "xlsx":
+            content = generate_xlsx(headers, rows, sheet_name="Conversations")
+            filename = f"conversations_{timestamp}.xlsx"
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            return content, filename, media_type
+        elif norm_format == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow([
-                "ID", "Subject", "Status", "Channel", "Customer ID", "Agent ID",
-                "Created At", "Updated At", "Resolved At", "First Response At",
-                "SLA Response Due", "SLA Resolution Due",
-                "SLA Response Breached", "SLA Resolution Breached"
-            ])
-            for conv in conversations:
-                writer.writerow([
-                    conv.id, conv.subject or "", conv.status, conv.channel,
-                    conv.customer_id, conv.assigned_agent_id or "",
-                    conv.created_at.isoformat() if conv.created_at else "",
-                    conv.updated_at.isoformat() if conv.updated_at else "",
-                    conv.resolved_at.isoformat() if conv.resolved_at else "",
-                    conv.first_response_at.isoformat() if conv.first_response_at else "",
-                    conv.sla_response_due_at.isoformat() if conv.sla_response_due_at else "",
-                    conv.sla_resolution_due_at.isoformat() if conv.sla_resolution_due_at else "",
-                    conv.sla_response_breached, conv.sla_resolution_breached,
-                ])
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(row)
             content = output.getvalue()
             filename = f"conversations_{timestamp}.csv"
+            media_type = "text/csv"
+            return content, filename, media_type
         else:
             data = [
-                {
-                    "id": conv.id,
-                    "subject": conv.subject,
-                    "status": conv.status,
-                    "channel": conv.channel,
-                    "customer_id": conv.customer_id,
-                    "agent_id": conv.assigned_agent_id,
-                    "created_at": conv.created_at.isoformat() if conv.created_at else None,
-                    "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
-                    "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
-                    "first_response_at": conv.first_response_at.isoformat() if conv.first_response_at else None,
-                    "sla_response_due_at": conv.sla_response_due_at.isoformat() if conv.sla_response_due_at else None,
-                    "sla_resolution_due_at": conv.sla_resolution_due_at.isoformat() if conv.sla_resolution_due_at else None,
-                    "sla_response_breached": conv.sla_response_breached,
-                    "sla_resolution_breached": conv.sla_resolution_breached,
-                }
+                {k: field_definitions[k][1](conv) for k in active_fields}
                 for conv in conversations
             ]
             content = json.dumps(data, indent=2)
             filename = f"conversations_{timestamp}.json"
-    
+            media_type = "application/json"
+            return content, filename, media_type
+
     elif report_type == "agents":
         agents_data = get_agent_performance(db, start_date, end_date)
-        
-        if format == "csv":
+        headers = [
+            "Agent ID", "Agent Name", "Total Assigned", "Resolved Count",
+            "Avg Response Time (min)", "Avg Resolution Time (hr)",
+            "SLA Response Breached", "SLA Resolution Breached"
+        ]
+        rows = [
+            [
+                a["agent_id"], a["agent_name"], a["total_assigned"], a["resolved_count"],
+                a["avg_response_time_minutes"], a["avg_resolution_time_hours"],
+                a["sla_response_breached_count"], a["sla_resolution_breached_count"]
+            ]
+            for a in agents_data
+        ]
+        if norm_format == "xlsx":
+            content = generate_xlsx(headers, rows, sheet_name="Agents")
+            return content, f"agents_{timestamp}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif norm_format == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow([
-                "Agent ID", "Agent Name", "Conversations Handled", "Conversations Resolved",
-                "Avg Response Time (min)", "Avg Resolution Time (min)",
-                "SLA Response Met %", "SLA Resolution Met %", "Current Active"
-            ])
-            for a in agents_data:
-                writer.writerow([
-                    a["agent_id"], a["agent_name"], a["conversations_handled"],
-                    a["conversations_resolved"], a["avg_response_time_minutes"] or "",
-                    a["avg_resolution_time_minutes"] or "",
-                    a["sla_response_met_pct"] or "", a["sla_resolution_met_pct"] or "",
-                    a["current_active"],
-                ])
-            content = output.getvalue()
-            filename = f"agents_{timestamp}.csv"
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(row)
+            return output.getvalue(), f"agents_{timestamp}.csv", "text/csv"
         else:
-            content = json.dumps(agents_data, indent=2)
-            filename = f"agents_{timestamp}.json"
-    
+            return json.dumps(agents_data, indent=2), f"agents_{timestamp}.json", "application/json"
+
     elif report_type == "knowledge":
-        kb_metrics = get_knowledge_base_metrics(db)
-        
-        if format == "csv":
+        metrics = get_knowledge_base_metrics(db)
+        headers = ["Metric", "Value"]
+        rows = [
+            ["Total Articles", metrics.get("total_articles", 0)],
+            ["Published Articles", metrics.get("published_articles", 0)],
+            ["Total FAQs", metrics.get("total_faqs", 0)],
+            ["Published FAQs", metrics.get("published_faqs", 0)],
+            ["Total Views", metrics.get("total_views", 0)],
+            ["Helpful Rating %", metrics.get("helpful_rating_pct", 0.0)],
+        ]
+        if norm_format == "xlsx":
+            content = generate_xlsx(headers, rows, sheet_name="KnowledgeBase")
+            return content, f"knowledge_{timestamp}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif norm_format == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow(["Metric", "Value"])
-            for k, v in kb_metrics.items():
-                writer.writerow([k, v])
-            content = output.getvalue()
-            filename = f"knowledge_{timestamp}.csv"
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(row)
+            return output.getvalue(), f"knowledge_{timestamp}.csv", "text/csv"
         else:
-            content = json.dumps(kb_metrics, indent=2)
-            filename = f"knowledge_{timestamp}.json"
-    
+            return json.dumps(metrics, indent=2), f"knowledge_{timestamp}.json", "application/json"
+
     elif report_type == "sla":
-        conversations = db.query(Conversation).all()
-        
-        if format == "csv":
+        sla_data = get_sla_compliance(db, start_date, end_date)
+        headers = ["Metric", "Value"]
+        rows = [
+            ["Total Conversations", sla_data.get("total_conversations", 0)],
+            ["First Response Met", sla_data.get("first_response_met", 0)],
+            ["First Response Breached", sla_data.get("first_response_breached", 0)],
+            ["First Response Compliance %", sla_data.get("first_response_compliance_pct", 0.0)],
+            ["Resolution Met", sla_data.get("resolution_met", 0)],
+            ["Resolution Breached", sla_data.get("resolution_breached", 0)],
+            ["Resolution Compliance %", sla_data.get("resolution_compliance_pct", 0.0)],
+        ]
+        if norm_format == "xlsx":
+            content = generate_xlsx(headers, rows, sheet_name="SLA")
+            return content, f"sla_{timestamp}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif norm_format == "csv":
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow([
-                "Conversation ID", "Subject", "Status", "Agent", "Created At",
-                "Response Due", "Resolution Due", "Response Breached", "Resolution Breached",
-                "First Response At", "Resolved At"
-            ])
-            for conv in conversations:
-                sla = get_sla_status(conv)
-                writer.writerow([
-                    conv.id, conv.subject or "", conv.status,
-                    conv.assigned_agent_id or "",
-                    conv.created_at.isoformat() if conv.created_at else "",
-                    conv.sla_response_due_at.isoformat() if conv.sla_response_due_at else "",
-                    conv.sla_resolution_due_at.isoformat() if conv.sla_resolution_due_at else "",
-                    conv.sla_response_breached, conv.sla_resolution_breached,
-                    conv.first_response_at.isoformat() if conv.first_response_at else "",
-                    conv.resolved_at.isoformat() if conv.resolved_at else "",
-                ])
-            content = output.getvalue()
-            filename = f"sla_{timestamp}.csv"
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(row)
+            return output.getvalue(), f"sla_{timestamp}.csv", "text/csv"
         else:
-            data = []
-            for conv in conversations:
-                sla = get_sla_status(conv)
-                data.append({
-                    "conversation_id": conv.id,
-                    "subject": conv.subject,
-                    "status": conv.status,
-                    "agent_id": conv.assigned_agent_id,
-                    "created_at": conv.created_at.isoformat() if conv.created_at else None,
-                    "response_due_at": conv.sla_response_due_at.isoformat() if conv.sla_response_due_at else None,
-                    "resolution_due_at": conv.sla_resolution_due_at.isoformat() if conv.sla_resolution_due_at else None,
-                    "response_breached": conv.sla_response_breached,
-                    "resolution_breached": conv.sla_resolution_breached,
-                    "first_response_at": conv.first_response_at.isoformat() if conv.first_response_at else None,
-                    "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
-                    "sla_status": sla,
-                })
-            content = json.dumps(data, indent=2)
-            filename = f"sla_{timestamp}.json"
-    
-    else:
-        raise ValueError(f"Unknown report type: {report_type}")
-    
-    return content, filename
+            return json.dumps(sla_data, indent=2), f"sla_{timestamp}.json", "application/json"
+
+    raise ValueError(f"Unknown report type: {report_type}")

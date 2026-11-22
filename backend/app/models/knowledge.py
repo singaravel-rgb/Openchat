@@ -19,13 +19,12 @@ class Category(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
 
     display_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
@@ -81,14 +80,13 @@ class Article(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
 
     author_id: Mapped[int] = mapped_column(
@@ -150,7 +148,6 @@ class FAQ(Base):
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"),
         nullable=True,
-        index=True,
     )
 
     is_published: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)

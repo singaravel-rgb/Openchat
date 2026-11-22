@@ -56,8 +56,9 @@ class KnowledgeBaseMetrics(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    report_type: str  # conversations, agents, knowledge, sla
-    format: str = "csv"  # csv, json
+    report_type: str = "conversations"  # conversations, agents, knowledge, sla
+    format: str = "csv"  # csv, xlsx, excel, json
+    fields: Optional[list[str]] = None
     filters: Optional[ReportFilters] = None
 
 

@@ -120,6 +120,29 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  forgotPassword: (email: string) =>
+    fetchApi<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  validateResetToken: (token: string) =>
+    fetchApi<{ valid: boolean; email?: string; message?: string }>(
+      `/auth/reset-password/validate?token=${encodeURIComponent(token)}`
+    ),
+
+  resetPassword: (data: { token: string; password: string; confirm_password: string }) =>
+    fetchApi<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  changePassword: (data: { current_password: string; new_password: string; confirm_password: string }) =>
+    fetchApi<{ message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const conversationApi = {
@@ -175,10 +198,12 @@ export const conversationApi = {
 };
 
 export const agentApi = {
-  listConversations: (queue?: string, status?: string, q?: string) => {
+  listConversations: (queue?: string, status?: string, q?: string, handling?: string, filter?: string) => {
     const params = new URLSearchParams();
     if (queue) params.append('queue', queue);
     if (status) params.append('status', status);
+    if (handling) params.append('handling', handling);
+    if (filter) params.append('filter', filter);
     if (q) params.append('q', q);
     return fetchApi<ConversationListItem[]>(`/agent/conversations?${params}`);
   },
@@ -383,6 +408,12 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
 
+  resetUserPassword: (userId: number) =>
+    fetchApi<{ message: string; reset_token?: string; reset_url?: string; expires_at?: string }>(
+      `/admin/users/${userId}/reset-password`,
+      { method: 'POST' }
+    ),
+
   listAgents: () => fetchApi<AdminAgent[]>('/admin/agents'),
 
   createAgent: (data: {
@@ -407,11 +438,13 @@ export const adminApi = {
       method: 'PATCH',
     }),
 
-  listConversations: (params?: { status?: string; agent_id?: number; customer_id?: number; q?: string; limit?: number; offset?: number }) => {
+  listConversations: (params?: { status?: string; agent_id?: number; customer_id?: number; handling?: string; filter?: string; q?: string; limit?: number; offset?: number }) => {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.append('status', params.status);
     if (params?.agent_id) searchParams.append('agent_id', params.agent_id.toString());
     if (params?.customer_id) searchParams.append('customer_id', params.customer_id.toString());
+    if (params?.handling) searchParams.append('handling', params.handling);
+    if (params?.filter) searchParams.append('filter', params.filter);
     if (params?.q) searchParams.append('q', params.q);
     if (params?.limit) searchParams.append('limit', params.limit.toString());
     if (params?.offset) searchParams.append('offset', params.offset.toString());

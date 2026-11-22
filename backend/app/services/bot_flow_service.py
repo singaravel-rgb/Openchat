@@ -309,15 +309,37 @@ DEFAULT_STEPS = [
 ]
 
 
+def _normalize_issue_key(title: str, step_key: str = "") -> str:
+    """Normalize issue title/key to prevent duplicate seed issues with/without emojis."""
+    clean_title = re.sub(r"[^\w\s]", "", title or "").strip().lower()
+    clean_key = (step_key or "").strip().lower()
+    return f"{clean_key}:{clean_title}"
+
+
 def seed_default_bot_flow(db: Session) -> BotFlow:
     """Ensure a default published bot flow exists with multi-level categories and steps."""
     flow = db.query(BotFlow).filter(BotFlow.is_default == True).first()  # noqa: E712
     if not flow:
         flow = db.query(BotFlow).filter(BotFlow.status == "published").first()
     if flow:
-        existing_issues = {i.title: i for i in db.query(BotFlowIssue).filter(BotFlowIssue.flow_id == flow.id).all()}
+        # Load all existing issues and identify duplicates by start_step_key or normalized title
+        all_existing_issues = db.query(BotFlowIssue).filter(BotFlowIssue.flow_id == flow.id).order_by(BotFlowIssue.id.asc()).all()
+        existing_by_step = {}
+        for i in all_existing_issues:
+            step_k = (i.start_step_key or "").strip()
+            norm_k = re.sub(r"[^\w\s]", "", i.title or "").strip().lower()
+            key = step_k or norm_k
+            if key in existing_by_step:
+                # Duplicate detected: keep the earliest or active one, delete duplicate
+                db.delete(i)
+            else:
+                existing_by_step[key] = i
+
         for issue_data in DEFAULT_ISSUES:
-            if issue_data["title"] not in existing_issues:
+            step_k = issue_data["start_step_key"].strip()
+            norm_k = re.sub(r"[^\w\s]", "", issue_data["title"]).strip().lower()
+            matched = existing_by_step.get(step_k) or existing_by_step.get(norm_k)
+            if not matched:
                 issue = BotFlowIssue(
                     flow_id=flow.id,
                     title=issue_data["title"],
@@ -327,10 +349,13 @@ def seed_default_bot_flow(db: Session) -> BotFlow:
                     is_active=True,
                 )
                 db.add(issue)
+                existing_by_step[step_k] = issue
             else:
-                existing = existing_issues[issue_data["title"]]
-                existing.start_step_key = issue_data["start_step_key"]
-                existing.sort_order = issue_data["sort_order"]
+                matched.title = issue_data["title"]
+                matched.description = issue_data["description"]
+                matched.start_step_key = issue_data["start_step_key"]
+                matched.sort_order = issue_data["sort_order"]
+                matched.is_active = True
 
         existing_steps = {s.step_key: s for s in db.query(BotFlowStep).filter(BotFlowStep.flow_id == flow.id).all()}
         for step_data in DEFAULT_STEPS:
@@ -438,20 +463,25 @@ def get_active_bot_flow_data(db: Session) -> dict:
             "is_terminal": s.is_terminal,
         }
 
-    return {
-        "id": flow.id,
-        "name": flow.name,
-        "initial_greeting": flow.initial_greeting or "Hello! Welcome to OpenChat Support. How can we help you today?",
-        "issues": [
-            {
+    seen_keys = set()
+    unique_issues = []
+    for i in issues:
+        norm_key = (i.start_step_key or "").strip() or re.sub(r"[^\w\s]", "", i.title or "").strip().lower()
+        if norm_key not in seen_keys:
+            seen_keys.add(norm_key)
+            unique_issues.append({
                 "id": i.id,
                 "title": i.title,
                 "description": i.description,
                 "start_step_key": i.start_step_key,
                 "sort_order": i.sort_order,
-            }
-            for i in issues
-        ],
+            })
+
+    return {
+        "id": flow.id,
+        "name": flow.name,
+        "initial_greeting": flow.initial_greeting or "Hello! Welcome to OpenChat Support. How can we help you today?",
+        "issues": unique_issues,
         "steps": steps_dict,
     }
 

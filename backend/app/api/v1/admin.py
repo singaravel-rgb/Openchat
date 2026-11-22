@@ -122,11 +122,14 @@ def get_admin_stats(
         )
         .count()
     )
-    unanswered_conversations = pending_conversations + waiting_on_customer_conversations
+    total_unresolved = db.query(Conversation).filter(Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED])).count()
+    unanswered_conversations = db.query(Conversation).filter(Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED, ConversationStatus.PENDING])).count()
 
     return {
         "conversations": {
             "total": total_conversations,
+            "total_unresolved": total_unresolved,
+            "unresolved": total_unresolved,
             "ai_handling": ai_handling_conversations,
             "ai_resolved": ai_resolved_conversations,
             "human_handled": human_handled_conversations,
@@ -352,13 +355,26 @@ def list_all_conversations_admin(
     status_filter: Optional[str] = Query(None, alias="status"),
     agent_id: Optional[int] = Query(None),
     customer_id: Optional[int] = Query(None),
+    handling: Optional[str] = Query(None),
+    filter_type: Optional[str] = Query(None, alias="filter"),
     q: Optional[str] = Query(None),
     limit: int = Query(50, le=200, ge=1),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    items, _ = list_conversations_query(db, viewer=current_user, status_filter=status_filter, agent_id=agent_id, customer_id=customer_id, q=q, limit=limit, offset=offset)
+    items, _ = list_conversations_query(
+        db,
+        viewer=current_user,
+        status_filter=status_filter,
+        agent_id=agent_id,
+        customer_id=customer_id,
+        handling=handling,
+        filter_type=filter_type,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
     return [build_conversation_list_item(db, c, viewer=current_user) for c in items]
 
 

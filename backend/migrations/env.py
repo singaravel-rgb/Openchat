@@ -26,6 +26,7 @@ from app.models.webhook import Webhook, WebhookDelivery
 from app.models.automation_rule import AutomationRule, AutomationRuleExecution
 from app.models.campaign import Campaign, CampaignMessage
 from app.models.conversation_task import ConversationTask
+from app.models.password_reset import PasswordResetToken
 config = context.config
 
 if config.config_file_name is not None:

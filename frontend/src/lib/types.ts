@@ -112,6 +112,7 @@ export interface Message {
   retracted_at?: string | null;
   original_conversation_id?: number | null;
   ai_metadata?: Record<string, any> | null;
+  attachments?: Attachment[];
 }
 
 export type MessageSenderType = 'customer' | 'agent' | 'ai' | 'system';
@@ -203,6 +204,8 @@ export interface AgentWorkload {
 export interface AdminStats {
   conversations: {
     total: number;
+    total_unresolved?: number;
+    unresolved?: number;
     ai_handling: number;
     ai_resolved?: number;
     human_handled?: number;
@@ -975,6 +978,8 @@ export interface Attachment {
   filename: string;
   original_filename: string;
   mime_type: string;
+  content_type?: string;
+  download_url?: string;
   file_size: number;
   is_image: boolean;
   file_path: string;

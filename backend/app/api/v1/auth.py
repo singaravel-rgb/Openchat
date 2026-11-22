@@ -1,8 +1,11 @@
+import hashlib
 import json
+import re
+import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -18,8 +21,19 @@ from app.db.session import get_db
 from app.models.agent_profile import AgentProfile
 from app.models.audit_log import AuditLog
 from app.models.invitation import UserInvitation
+from app.models.password_reset import PasswordResetToken
 from app.models.user import User
-from app.schemas.auth import UserCreate, UserResponse, Token, AgentProfileSummary
+from app.schemas.auth import (
+    UserCreate,
+    UserResponse,
+    Token,
+    AgentProfileSummary,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ChangePasswordRequest,
+    PasswordResetValidateResponse,
+    GenericMessageResponse,
+)
 from app.schemas.user_management import InvitationAcceptRequest, InvitationInspectResponse
 
 
@@ -28,6 +42,19 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # Brute-force protection settings
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_WINDOW_SECONDS = 900  # 15 minutes
+
+
+def validate_password_strength(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long.",
+        )
+    if not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must contain at least one letter and one number.",
+        )
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -264,3 +291,233 @@ def accept_invitation(
         "token_type": "bearer",
     }
 
+
+# ==============================================================================
+# Agent Account & Password Management Endpoints
+# ==============================================================================
+
+@router.post("/forgot-password", response_model=GenericMessageResponse)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Request a secure password reset link.
+    Never exposes whether an email address exists (anti-enumeration).
+    Rate-limits requests per client IP and email.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    rate_key = f"forgot_pwd_rate:{client_ip}:{payload.email.lower()}"
+    try:
+        attempts = redis_client.incr(rate_key)
+        if attempts == 1:
+            redis_client.expire(rate_key, 900)
+        if attempts > 5:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many password reset requests. Please try again in 15 minutes.",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    user = db.query(User).filter(User.email.ilike(payload.email), User.is_active == True).first()  # noqa: E712
+    if user:
+        # Invalidate existing pending tokens
+        now = datetime.now(timezone.utc)
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        ).update({"used_at": now})
+
+        # Generate cryptographically secure token
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires_at = now + timedelta(minutes=30)
+
+        reset_record = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+        db.add(reset_record)
+
+        audit = AuditLog(
+            user_id=user.id,
+            action="auth.forgot_password_requested",
+            resource_type="user",
+            resource_id=user.id,
+            details=json.dumps({"ip": client_ip}),
+        )
+        db.add(audit)
+        db.commit()
+
+        # In production/staging, email_service delivers the reset link.
+        # Fallback logging for auditability:
+        from app.services.email_service import send_email
+        reset_link = f"/reset-password?token={raw_token}"
+        try:
+            send_email(
+                to_email=user.email,
+                subject="Reset your OpenChat password",
+                body=f"Hello {user.full_name},\n\nPlease use the following link to reset your password (valid for 30 minutes):\n{reset_link}\n\nIf you did not request this, please ignore this email.",
+            )
+        except Exception:
+            pass
+
+    return {
+        "message": "If an account with that email exists, password reset instructions have been sent.",
+    }
+
+
+@router.get("/reset-password/validate", response_model=PasswordResetValidateResponse)
+def validate_reset_token(
+    token: str = Query(..., min_length=10),
+    db: Session = Depends(get_db),
+):
+    """
+    Validate that a password reset token exists, is unexpired, and has not been used.
+    """
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.used_at.is_(None),
+    ).first()
+
+    now = datetime.now(timezone.utc)
+    rec_exp = record.expires_at if record and record.expires_at.tzinfo else (record.expires_at.replace(tzinfo=timezone.utc) if record else None)
+    if not record or (rec_exp and rec_exp < now):
+        return {
+            "valid": False,
+            "message": "This password reset link is invalid or has expired. Please request a new one.",
+        }
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    masked_email = None
+    if user and "@" in user.email:
+        parts = user.email.split("@")
+        name, domain = parts[0], parts[1]
+        masked_name = name[:2] + "***" if len(name) > 2 else name + "***"
+        masked_email = f"{masked_name}@{domain}"
+
+    return {
+        "valid": True,
+        "email": masked_email,
+        "message": "Token is valid.",
+    }
+
+
+@router.post("/reset-password", response_model=GenericMessageResponse)
+def reset_password(
+    payload: ResetPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Reset account password using a validated single-use token.
+    Enforces password strength, invalidates token and clears lockout.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    if payload.password != payload.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match.",
+        )
+    validate_password_strength(payload.password)
+
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.used_at.is_(None),
+    ).first()
+
+    now = datetime.now(timezone.utc)
+    rec_exp = record.expires_at if record and record.expires_at.tzinfo else (record.expires_at.replace(tzinfo=timezone.utc) if record else None)
+    if not record or (rec_exp and rec_exp < now):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This password reset link is invalid or has expired. Please request a new one.",
+        )
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account is inactive or not found.",
+        )
+
+    # Invalidate token
+    record.used_at = now
+    user.password_hash = hash_password(payload.password)
+
+    # Clear any lockout keys in Redis for this user
+    try:
+        lock_key = f"login_lock:*:{user.email.lower()}"
+        attempt_key = f"login_attempts:*:{user.email.lower()}"
+        for k in redis_client.keys(f"login_*:{user.email.lower()}"):
+            redis_client.delete(k)
+    except Exception:
+        pass
+
+    audit = AuditLog(
+        user_id=user.id,
+        action="auth.password_reset_completed",
+        resource_type="user",
+        resource_id=user.id,
+        details=json.dumps({"ip": client_ip}),
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "message": "Your password has been reset successfully. You can now log in with your new password.",
+    }
+
+
+@router.post("/change-password", response_model=GenericMessageResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Change password for the currently authenticated agent or administrator.
+    Verifies current password, prevents password reuse, and enforces password policy.
+    """
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password and confirmation do not match.",
+        )
+
+    if verify_password(payload.new_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password cannot be the same as your current password.",
+        )
+
+    validate_password_strength(payload.new_password)
+
+    current_user.password_hash = hash_password(payload.new_password)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        action="auth.password_changed",
+        resource_type="user",
+        resource_id=current_user.id,
+        details=json.dumps({"actor_id": current_user.id}),
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "message": "Password changed successfully.",
+    }

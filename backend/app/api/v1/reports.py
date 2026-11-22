@@ -81,20 +81,22 @@ def export_report_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """Export report to CSV or JSON."""
+    """Export report to CSV, XLSX, or JSON."""
     try:
-        content, filename = export_report(
+        content, filename, media_type = export_report(
             db,
             request.report_type,
             request.format,
             request.filters.start_date if request.filters else None,
             request.filters.end_date if request.filters else None,
             request.filters.agent_id if request.filters else None,
+            fields=request.fields,
+            user_role=current_user.role,
         )
         
-        media_type = "text/csv" if request.format == "csv" else "application/json"
+        bio = io.BytesIO(content) if isinstance(content, bytes) else io.BytesIO(content.encode("utf-8"))
         return StreamingResponse(
-            io.BytesIO(content.encode("utf-8")),
+            bio,
             media_type=media_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
@@ -104,21 +106,23 @@ def export_report_endpoint(
 
 @router.get("/export/conversations")
 def export_conversations(
-    format: str = Query("csv", pattern="^(csv|json)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|excel|json)$"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     agent_id: Optional[int] = Query(None),
+    fields: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """Quick export conversations (GET endpoint for direct links)."""
-    content, filename = export_report(
-        db, "conversations", format, start_date, end_date, agent_id
+    selected_fields = [f.strip() for f in fields.split(",") if f.strip()] if fields else None
+    content, filename, media_type = export_report(
+        db, "conversations", format, start_date, end_date, agent_id, fields=selected_fields, user_role=current_user.role
     )
     
-    media_type = "text/csv" if format == "csv" else "application/json"
+    bio = io.BytesIO(content) if isinstance(content, bytes) else io.BytesIO(content.encode("utf-8"))
     return StreamingResponse(
-        io.BytesIO(content.encode("utf-8")),
+        bio,
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
@@ -126,18 +130,18 @@ def export_conversations(
 
 @router.get("/export/agents")
 def export_agents(
-    format: str = Query("csv", pattern="^(csv|json)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|excel|json)$"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """Quick export agents performance."""
-    content, filename = export_report(db, "agents", format, start_date, end_date)
+    content, filename, media_type = export_report(db, "agents", format, start_date, end_date, user_role=current_user.role)
     
-    media_type = "text/csv" if format == "csv" else "application/json"
+    bio = io.BytesIO(content) if isinstance(content, bytes) else io.BytesIO(content.encode("utf-8"))
     return StreamingResponse(
-        io.BytesIO(content.encode("utf-8")),
+        bio,
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
@@ -145,16 +149,16 @@ def export_agents(
 
 @router.get("/export/knowledge")
 def export_knowledge(
-    format: str = Query("csv", pattern="^(csv|json)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|excel|json)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """Quick export knowledge base metrics."""
-    content, filename = export_report(db, "knowledge", format)
+    content, filename, media_type = export_report(db, "knowledge", format, user_role=current_user.role)
     
-    media_type = "text/csv" if format == "csv" else "application/json"
+    bio = io.BytesIO(content) if isinstance(content, bytes) else io.BytesIO(content.encode("utf-8"))
     return StreamingResponse(
-        io.BytesIO(content.encode("utf-8")),
+        bio,
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
@@ -162,16 +166,16 @@ def export_knowledge(
 
 @router.get("/export/sla")
 def export_sla(
-    format: str = Query("csv", pattern="^(csv|json)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|excel|json)$"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     """Quick export SLA report."""
-    content, filename = export_report(db, "sla", format)
+    content, filename, media_type = export_report(db, "sla", format, user_role=current_user.role)
     
-    media_type = "text/csv" if format == "csv" else "application/json"
+    bio = io.BytesIO(content) if isinstance(content, bytes) else io.BytesIO(content.encode("utf-8"))
     return StreamingResponse(
-        io.BytesIO(content.encode("utf-8")),
+        bio,
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )

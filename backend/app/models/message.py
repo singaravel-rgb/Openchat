@@ -107,3 +107,10 @@ class Message(Base):
         foreign_keys=[retracted_by_id],
     )
 
+    attachments = relationship(
+        "Attachment",
+        foreign_keys="Attachment.message_id",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+

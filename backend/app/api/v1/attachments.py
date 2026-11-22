@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, status, UploadFile, File, Form, Response
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, require_roles
@@ -77,11 +77,33 @@ def list_attachments(
 @router.get("/{attachment_id}/download")
 def download_attachment(
     attachment_id: int,
-    current_user: User = Depends(get_current_user),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """Download an attachment file."""
+    """Download an attachment file. Supports Bearer header or ?token query param."""
+    import jwt
+    from app.core.config import settings
     from app.models.conversation import Conversation
+    from app.models.user import User
+
+    auth_token = None
+    if authorization and authorization.lower().startswith("bearer "):
+        auth_token = authorization.split(" ", 1)[1].strip()
+    elif token:
+        auth_token = token.strip()
+
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    try:
+        payload = jwt.decode(auth_token, settings.secret_key, algorithms=[settings.algorithm])
+        user_id = int(payload.get("sub"))
+        current_user = db.query(User).filter(User.id == user_id, User.is_active == True).first()  # noqa: E712
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Invalid user")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
 
     attachment = get_attachment_by_id(db, attachment_id)
     if not attachment:
@@ -98,18 +120,17 @@ def download_attachment(
 
     if current_user.role == "customer" and conversation.customer_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    if current_user.role == "agent" and conversation.assigned_agent_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized")
 
     file_path = get_attachment_file_path(attachment)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
 
+    disposition = "inline" if attachment.is_image else "attachment"
     return Response(
         content=open(file_path, "rb").read(),
         media_type=attachment.mime_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{attachment.original_filename}"'
+            "Content-Disposition": f'{disposition}; filename="{attachment.original_filename}"'
         },
     )
 

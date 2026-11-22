@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.schemas.attachment import AttachmentResponse
 
 
 class ConversationCreate(BaseModel):
@@ -45,6 +46,7 @@ class MessageResponse(BaseModel):
     is_retracted: bool = False
     retracted_at: Optional[datetime] = None
     original_conversation_id: Optional[int] = None
+    attachments: Optional[List[AttachmentResponse]] = Field(default_factory=list)
 
 
 class ConversationUpdate(BaseModel):
