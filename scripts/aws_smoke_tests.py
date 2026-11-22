@@ -54,6 +54,23 @@ def run_smoke_tests(base_url: str, test_origin: str | None = None) -> bool:
         "Referer": f"{test_origin}/"
     }
 
+    # Readiness warmup check (allows up to 60s for containers to settle after restart)
+    print(f"[*] Checking staging health readiness at {base_url}/health ...")
+    with httpx.Client(follow_redirects=True) as warmup_client:
+        ready = False
+        for attempt in range(1, 13):
+            try:
+                r = warmup_client.get(f"{base_url}/health", timeout=5.0)
+                if r.status_code == 200:
+                    print(f"    Staging environment is online and healthy (attempt {attempt}).\n")
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
+        if not ready:
+            print("    [!] Warning: /health did not return 200 during warmup; proceeding with suite.\n")
+
     with httpx.Client(follow_redirects=True) as client:
         # Test 1: Frontend UI Root Check
         r_front = test_endpoint(client, "1. Frontend UI Root", "GET", f"{base_url}/", expected_statuses=(200, 301, 302, 307))
