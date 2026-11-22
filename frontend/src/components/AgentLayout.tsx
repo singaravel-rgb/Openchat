@@ -54,8 +54,8 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
       router.push('/login');
     } else if (user && user.role === 'customer') {
       router.push('/customer');
-    } else if (user && (user.role === 'admin' || user.role === 'super_admin') && pathname.startsWith('/agent')) {
-      router.push('/admin');
+    } else if (user && (user.role === 'admin' || user.role === 'super_admin') && pathname === '/agent') {
+      router.push('/admin/conversations');
     }
   }, [user, isLoading, router, pathname]);
 
