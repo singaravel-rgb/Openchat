@@ -126,7 +126,7 @@ Routes generated:
 
 ---
 
-## 4. Deployment Strategy to Staging EC2
+## 4. Deployment Strategy & Live Staging QA Verification
 
 1. **Security & Least-Privilege Assurance:**
    - Deployment utilizes GitHub Actions OIDC role `arn:aws:iam::051372063142:role/openchat-staging-ec2-deployer`.
@@ -136,5 +136,13 @@ Routes generated:
 
 2. **Zero Data Loss Guarantee:**
    - Docker volumes `postgres_data` and `redis_data` are untouched.
-   - Database migrations are applied monotonically via `alembic upgrade head`.
+   - Database migrations and schemas applied safely (`alembic upgrade head`).
    - Existing customer accounts, tickets, and Gemini AI configurations remain intact.
+
+3. **Live Staging Browser Verification Results (`bd5d914`):**
+   - **Customer Widget & Help Flow:** PASSED (Verified header tabs `💬 Chat` and `📋 My Chats`, paperclip upload icon, and `/help` command knowledge response).
+   - **Forgot Password Flow:** PASSED (Verified `/login` -> `/forgot-password` route with reset form).
+   - **Workspace & Export Modal:** PASSED (Verified 3-panel layout, composer expand/collapse toggle rows 2 -> 6, and Export modal supporting CSV and native Excel XLSX).
+   - **Agent/Admin Settings Password Form:** PASSED (Verified `Security & Password` form with Current, New, and Confirm password inputs).
+   - **Admin Agents Reset Password Modal:** PASSED (Verified single-use reset URL generation with one-click clipboard copy).
+
