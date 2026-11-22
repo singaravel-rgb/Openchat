@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
@@ -31,6 +31,7 @@ interface ThreePanelWorkspaceProps {
 // Admin filter types
 interface AdminFilters {
   status: string;
+  handling?: string;
   agent_id: string;
   customer_id: string;
   q: string;
@@ -139,15 +140,24 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   // Admin advanced filters
   const [adminFilters, setAdminFilters] = useState<AdminFilters>({
     status: searchParams?.get('status') || '',
+    handling: searchParams?.get('handling') || '',
     agent_id: '',
     customer_id: '',
     q: '',
   });
 
+  const [conversationLastReadAt, setConversationLastReadAt] = useState<string | null>(null);
+  const [conversationLastReadMsgId, setConversationLastReadMsgId] = useState<number | null>(null);
+
   useEffect(() => {
     const statusParam = searchParams?.get('status');
-    if (statusParam) {
-      setAdminFilters(prev => ({ ...prev, status: statusParam }));
+    const handlingParam = searchParams?.get('handling');
+    if (statusParam !== null || handlingParam !== null) {
+      setAdminFilters(prev => ({
+        ...prev,
+        status: statusParam || '',
+        handling: handlingParam || '',
+      }));
     }
   }, [searchParams]);
   const [messageInput, setMessageInput] = useState('');
@@ -328,6 +338,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       if (userRole === 'admin') {
         const filters = {
           status: adminFilters.status || undefined,
+          handling: adminFilters.handling || undefined,
           agent_id: adminFilters.agent_id ? parseInt(adminFilters.agent_id, 10) : undefined,
           customer_id: adminFilters.customer_id ? parseInt(adminFilters.customer_id, 10) : undefined,
           q: adminFilters.q || undefined,
@@ -416,6 +427,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setGlobalNoteUpdatedByName(detail.global_note_updated_by_name || null);
       setLinkedConversations(detail.linked_conversations || []);
       setIsEditingGlobalNote(false);
+
+      // Save last read info to compute unread separator
+      setConversationLastReadAt(detail.user_last_read_at || detail.agent_last_read_at || null);
+      setConversationLastReadMsgId(detail.last_read_message_id || null);
+
+      // If conversation has unread messages, mark as read on server & clear unread_count locally
+      const msgs = detail.messages || [];
+      const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+      if ((detail.unread_count ?? 0) > 0) {
+        conversationApi.markAsRead(id, lastMsg?.id).catch(() => {});
+        setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)));
+      }
     } catch (err) {
       if (seq === requestSeqRef.current) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to load conversation';
@@ -1123,6 +1146,19 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const otherAgentCount = useMemo(() => conversations.filter(c => c.assigned_agent_id && c.assigned_agent_id !== userId).length, [conversations, userId]);
   const totalCount = conversations.length;
 
+  const firstUnreadIndex = useMemo(() => {
+    if (!selectedConversation || (!conversationLastReadAt && !conversationLastReadMsgId)) {
+      return -1;
+    }
+    const readTime = conversationLastReadAt ? new Date(conversationLastReadAt).getTime() : 0;
+    return messages.findIndex((m) => {
+      if (m.sender_type === 'agent' && m.sender_id === userId) return false;
+      if (conversationLastReadMsgId && m.id > conversationLastReadMsgId) return true;
+      if (readTime && new Date(m.created_at).getTime() > readTime) return true;
+      return false;
+    });
+  }, [messages, selectedConversation, conversationLastReadAt, conversationLastReadMsgId, userId]);
+
   const filteredConversations = useMemo(() => {
     const searchQuery = userRole === 'admin' ? adminFilters.q : searchTerm;
     const filtered = conversations.filter((c) => {
@@ -1413,14 +1449,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   className={`group relative w-full overflow-hidden rounded-xl border px-3 py-3 text-left transition-all ${
                     isSelected
                       ? 'border-blue-200 bg-blue-50 shadow-sm dark:border-blue-800 dark:bg-blue-900/30'
+                      : conv.unread_count > 0
+                      ? 'border-emerald-300 bg-emerald-50/40 shadow-xs dark:border-emerald-800/40 dark:bg-emerald-950/20'
                       : 'border-transparent hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-700 dark:hover:bg-slate-800/50'
                   }`}
                   aria-selected={isSelected}
                   aria-label={conv.subject || 'No Subject'}
                 >
-                  {isSelected && (
+                  {isSelected ? (
                     <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-blue-600" aria-hidden="true" />
-                  )}
+                  ) : conv.unread_count > 0 ? (
+                    <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-emerald-500" aria-hidden="true" />
+                  ) : null}
                   <div className="flex items-start gap-3">
                     <Avatar
                       name={conv.customer_name || 'Guest Visitor'}
@@ -1439,7 +1479,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                                 {conv.customer_name || 'Unknown Customer'}
                               </span>
                               {conv.unread_count > 0 && (
-                                <span className="flex-shrink-0 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                <span className="flex-shrink-0 rounded-full bg-emerald-500 dark:bg-emerald-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-xs ring-1 ring-emerald-600/20">
                                   {conv.unread_count > 99 ? '99+' : conv.unread_count}
                                 </span>
                               )}
@@ -1452,7 +1492,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                             {formatTimestamp(conv.last_message_at || conv.updated_at)}
                           </span>
                         </div>
-                        <p className="line-clamp-2 text-xs text-slate-600 dark:text-slate-300">
+                        <p className={`line-clamp-2 text-xs ${conv.unread_count > 0 ? 'font-bold text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}>
                           {conv.last_message || 'No messages yet'}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -1957,39 +1997,54 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       </Button>
                     </div>
                   )}
-                  {messages.map((message) => {
+                  {messages.map((message, idx) => {
                   const info = senderInfo(message);
+                  const unreadSeparator = idx === firstUnreadIndex ? (
+                    <div className="flex items-center my-4 gap-3">
+                      <div className="flex-1 h-px bg-emerald-500/40"></div>
+                      <span className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300 rounded-full border border-emerald-500/30 shadow-xs">
+                        ─── Unread Messages ───
+                      </span>
+                      <div className="flex-1 h-px bg-emerald-500/40"></div>
+                    </div>
+                  ) : null;
                   const isSystemEvent =
                     message.message_type === 'system_event' || String(message.sender_type) === 'system';
                   if (isSystemEvent) {
                     return (
-                      <div key={message.id} className="flex justify-center my-2">
-                        <div className="max-w-[80%] rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-center text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                          {cleanDemoPrefix(message.content)}{' '}
-                          <span className="text-slate-400 dark:text-slate-500">
-                            {formatFullTimestamp(message.created_at)}
-                          </span>
+                      <Fragment key={message.id}>
+                        {unreadSeparator}
+                        <div className="flex justify-center my-2">
+                          <div className="max-w-[80%] rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-center text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            {cleanDemoPrefix(message.content)}{' '}
+                            <span className="text-slate-400 dark:text-slate-500">
+                              {formatFullTimestamp(message.created_at)}
+                            </span>
+                          </div>
                         </div>
-                      </div>
+                      </Fragment>
                     );
                   }
 
                   // Retracted message display (visible only to agents/admins)
                   if (message.is_retracted) {
                     return (
-                      <div key={message.id} className="flex justify-end my-1.5">
-                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/80 px-3 py-1.5 text-xs italic text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
-                          <span className="flex items-center gap-1.5">
-                            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                            </svg>
-                            Message retracted
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 not-italic">
-                              {formatTimestamp(message.retracted_at || message.created_at)}
+                      <Fragment key={message.id}>
+                        {unreadSeparator}
+                        <div className="flex justify-end my-1.5">
+                          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/80 px-3 py-1.5 text-xs italic text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+                            <span className="flex items-center gap-1.5">
+                              <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                              </svg>
+                              Message retracted
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 not-italic">
+                                {formatTimestamp(message.retracted_at || message.created_at)}
+                              </span>
                             </span>
-                          </span>
+                          </div>
                         </div>
-                      </div>
+                      </Fragment>
                     );
                   }
 
@@ -1999,86 +2054,88 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   if (isInternalNote) {
                     const canEdit = userRole === 'admin' || (message.sender_id === userId);
                     return (
-                      <div
-                        key={message.id}
-                        className="mx-auto my-2 w-full max-w-2xl rounded-lg border border-amber-200 bg-amber-50/90 p-3 shadow-sm dark:border-amber-800/60 dark:bg-amber-950/30"
-                      >
-                        <div className="flex items-center justify-between gap-2 border-b border-amber-200/60 pb-1.5 mb-2 dark:border-amber-800/40">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="inline-flex items-center gap-1 rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
-                              <svg className="w-3 h-3 text-amber-700 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                              </svg>
-                              PRIVATE NOTE / INTERNAL
-                            </span>
-                            <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">
-                              {message.sender_id === userId ? 'You' : (userRole === 'admin' ? 'Agent/Admin' : 'Colleague')}
-                            </span>
-                            {message.edited_at && (
-                              <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80 italic">
-                                (edited {formatTimestamp(message.edited_at)})
+                      <Fragment key={message.id}>
+                        {unreadSeparator}
+                        <div
+                          className="mx-auto my-2 w-full max-w-2xl rounded-lg border border-amber-200 bg-amber-50/90 p-3 shadow-sm dark:border-amber-800/60 dark:bg-amber-950/30"
+                        >
+                          <div className="flex items-center justify-between gap-2 border-b border-amber-200/60 pb-1.5 mb-2 dark:border-amber-800/40">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="inline-flex items-center gap-1 rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
+                                <svg className="w-3 h-3 text-amber-700 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                </svg>
+                                PRIVATE NOTE / INTERNAL
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <time className="text-[11px] text-amber-800/70 dark:text-amber-400/70">
-                              {formatFullTimestamp(message.created_at)}
-                            </time>
-                            {canEdit && editingNoteId !== message.id && (
-                              <button
-                                type="button"
-                                onClick={() => handleStartEditNote(message)}
-                                className="text-xs font-medium text-amber-800 hover:text-amber-950 dark:text-amber-300 dark:hover:text-amber-100 underline ml-2"
-                              >
-                                Edit
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {editingNoteId === message.id ? (
-                          <div className="space-y-2 mt-2">
-                            <textarea
-                              value={editingNoteContent}
-                              onChange={(e) => setEditingNoteContent(e.target.value)}
-                              rows={3}
-                              className="w-full rounded border border-amber-300 bg-white p-2 text-xs text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-amber-700 dark:bg-slate-900 dark:text-slate-100"
-                              autoFocus
-                            />
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-xs"
-                                onClick={handleCancelEditNote}
-                                disabled={savingNoteEdit}
-                              >
-                                Cancel
-                              </Button>
-                              <Button
-                                size="sm"
-                                className="h-6 px-3 text-xs bg-amber-600 hover:bg-amber-700 text-white"
-                                onClick={() => handleSaveEditNote(message.id)}
-                                disabled={savingNoteEdit || !editingNoteContent.trim()}
-                              >
-                                {savingNoteEdit ? 'Saving...' : 'Save'}
-                              </Button>
+                              <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                                {message.sender_id === userId ? 'You' : (userRole === 'admin' ? 'Agent/Admin' : 'Colleague')}
+                              </span>
+                              {message.edited_at && (
+                                <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80 italic">
+                                  (edited {formatTimestamp(message.edited_at)})
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <time className="text-[11px] text-amber-800/70 dark:text-amber-400/70">
+                                {formatFullTimestamp(message.created_at)}
+                              </time>
+                              {canEdit && editingNoteId !== message.id && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditNote(message)}
+                                  className="text-xs font-medium text-amber-800 hover:text-amber-950 dark:text-amber-300 dark:hover:text-amber-100 underline ml-2"
+                                >
+                                  Edit
+                                </button>
+                              )}
                             </div>
                           </div>
-                        ) : (
-                          <div className="text-xs leading-relaxed text-amber-950 dark:text-amber-100 whitespace-pre-wrap">
-                            {message.content.split(/(@[a-zA-Z0-9_\s.-]+?)(?=[,\.!?\s]|$)/g).map((part, i) =>
-                              part.startsWith('@') ? (
-                                <span key={i} className="inline-flex items-center rounded bg-amber-200/80 px-1 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
-                                  {part}
-                                </span>
-                              ) : (
-                                <span key={i}>{part}</span>
-                              )
-                            )}
-                          </div>
-                        )}
-                      </div>
+
+                          {editingNoteId === message.id ? (
+                            <div className="space-y-2 mt-2">
+                              <textarea
+                                value={editingNoteContent}
+                                onChange={(e) => setEditingNoteContent(e.target.value)}
+                                rows={3}
+                                className="w-full rounded border border-amber-300 bg-white p-2 text-xs text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-amber-700 dark:bg-slate-900 dark:text-slate-100"
+                                autoFocus
+                              />
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs"
+                                  onClick={handleCancelEditNote}
+                                  disabled={savingNoteEdit}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="h-6 px-3 text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                                  onClick={() => handleSaveEditNote(message.id)}
+                                  disabled={savingNoteEdit || !editingNoteContent.trim()}
+                                >
+                                  {savingNoteEdit ? 'Saving...' : 'Save'}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-xs leading-relaxed text-amber-950 dark:text-amber-100 whitespace-pre-wrap">
+                              {message.content.split(/(@[a-zA-Z0-9_\s.-]+?)(?=[,\.!?\s]|$)/g).map((part, i) =>
+                                part.startsWith('@') ? (
+                                  <span key={i} className="inline-flex items-center rounded bg-amber-200/80 px-1 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
+                                    {part}
+                                  </span>
+                                ) : (
+                                  <span key={i}>{part}</span>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </Fragment>
                     );
                   }
 
@@ -2089,7 +2146,9 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   // Customer or AI: Aligned to LEFT
                   if (!isAgent) {
                     return (
-                      <div key={message.id} className="flex gap-3 justify-start items-start">
+                      <Fragment key={message.id}>
+                        {unreadSeparator}
+                        <div className="flex gap-3 justify-start items-start">
                         {isAiMessage ? (
                           <Avatar
                             name="AI Assistant"
@@ -2183,15 +2242,18 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                           </div>
                         </div>
                       </div>
-                    );
-                  }
+                    </Fragment>
+                  );
+                }
 
-                  // Agent: Aligned to RIGHT (WhatsApp style)
-                  const isCurrentUser = message.sender_id === userId;
-                  const agentDisplayName = isCurrentUser ? 'You' : (userRole === 'admin' ? 'Agent' : 'Staff');
+                // Agent: Aligned to RIGHT (WhatsApp style)
+                const isCurrentUser = message.sender_id === userId;
+                const agentDisplayName = isCurrentUser ? 'You' : (userRole === 'admin' ? 'Agent' : 'Staff');
 
-                  return (
-                    <div key={message.id} className="flex gap-3 justify-end items-start">
+                return (
+                  <Fragment key={message.id}>
+                    {unreadSeparator}
+                    <div className="flex gap-3 justify-end items-start">
                       <div className="max-w-[75%] flex flex-col items-end">
                         <div className="mb-1 flex items-center gap-2">
                           <time className="text-[11px] text-slate-400 dark:text-slate-500">
@@ -2249,7 +2311,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                         className="bg-blue-600 text-white flex-shrink-0"
                       />
                     </div>
-                  );
+                  </Fragment>
+                );
                 })}
               </>
             )}
@@ -2379,20 +2442,37 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                       </svg>
                     </button>
                     {showEmojiMenu && (
-                      <div className="absolute bottom-full right-0 z-20 mb-1 grid w-28 grid-cols-4 gap-1 rounded border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                        {['😊', '👍', '🙏', '🎉', '👀', '✅', '⚠️', '📎'].map((emoji) => (
+                      <div className="absolute bottom-full right-0 z-30 mb-2 w-64 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl dark:border-slate-700 dark:bg-slate-900 animate-in fade-in zoom-in-95 duration-100">
+                        <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                          <span>Emoji Picker</span>
                           <button
-                            key={emoji}
                             type="button"
-                            onClick={() => {
-                              setMessageInput((prev) => prev + emoji);
-                              setShowEmojiMenu(false);
-                            }}
-                            className="rounded p-1 text-base hover:bg-slate-100 dark:hover:bg-slate-800"
+                            onClick={() => setShowEmojiMenu(false)}
+                            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                           >
-                            {emoji}
+                            ×
                           </button>
-                        ))}
+                        </div>
+                        <div className="grid grid-cols-8 gap-1">
+                          {[
+                            '😀', '😃', '😄', '😊', '😍', '🥰', '🤔', '😎',
+                            '👍', '👎', '👏', '🙏', '🙌', '🤝', '👋', '✍️',
+                            '🎉', '✨', '🔥', '💯', '⭐', '❤️', '💡', '🚀',
+                            '✅', '❌', '⚠️', 'ℹ️', '❓', '👀', '📎', '☕'
+                          ].map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => {
+                                setMessageInput((prev) => prev + emoji);
+                              }}
+                              className="rounded p-1 text-base hover:bg-slate-100 dark:hover:bg-slate-800 text-center transition-transform hover:scale-125"
+                              title={emoji}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

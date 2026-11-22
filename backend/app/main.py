@@ -104,6 +104,7 @@ async def startup_event():
         from app.db.base import Base
         from app.db.session import engine
         import app.models.password_reset
+        import app.models.conversation
         Base.metadata.create_all(bind=engine)
     except Exception as e:
         logger.warning(f"Error ensuring database tables: {e}")

@@ -195,6 +195,12 @@ export const conversationApi = {
     fetchApi<{ message: string; id: number }>(`/conversations/${conversationId}/messages/${messageId}/retract`, {
       method: 'POST',
     }),
+
+  markAsRead: (id: number, lastMessageId?: number) =>
+    fetchApi<{ status: string; conversation_id: number; user_id: number }>(`/conversations/${id}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ last_message_id: lastMessageId }),
+    }),
 };
 
 export const agentApi = {
@@ -316,6 +322,12 @@ export const agentApi = {
         target_conversation_id: targetConversationId,
         confirm_cross_customer: confirmCrossCustomer,
       }),
+    }),
+
+  markAsRead: (id: number, lastMessageId?: number) =>
+    fetchApi<{ status: string; conversation_id: number; user_id: number }>(`/conversations/${id}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ last_message_id: lastMessageId }),
     }),
 };
 
@@ -720,6 +732,12 @@ export const adminApi = {
   getSettings: (category: string) => fetchApi<SettingResponse[]>(`/admin/settings/${category}`),
   updateSetting: (category: string, key: string, value: any) => fetchApi<SettingResponse>(`/admin/settings/${category}/${key}`, { method: 'PATCH', body: JSON.stringify({ value }) }),
   bulkUpdateSettings: (category: string, settings: Record<string, any>) => fetchApi<SettingResponse[]>(`/admin/settings/${category}`, { method: 'PATCH', body: JSON.stringify({ settings }) }),
+
+  markAsRead: (id: number, lastMessageId?: number) =>
+    fetchApi<{ status: string; conversation_id: number; user_id: number }>(`/conversations/${id}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ last_message_id: lastMessageId }),
+    }),
 };
 
 export const notificationApi = {

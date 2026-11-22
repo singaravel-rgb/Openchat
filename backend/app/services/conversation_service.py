@@ -5,7 +5,7 @@ from sqlalchemy import func, or_, and_, distinct, text, select
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
-from app.models.conversation import Conversation, ConversationStatus, ConversationLink
+from app.models.conversation import Conversation, ConversationStatus, ConversationLink, ConversationUserRead
 from app.models.message import Message, MessageType, MessageSenderType
 from app.models.user import User
 from app.models.agent_profile import AgentProfile
@@ -151,10 +151,22 @@ def list_conversations_query(
         if customer_id:
             query = query.filter(Conversation.customer_id == customer_id)
 
+    # Always exclude merged child conversations from standard views
+    query = query.filter(Conversation.merged_into_id.is_(None))
+
     if status_filter:
         s = status_filter.lower()
         if s == "open":
-            query = query.filter(Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED]))
+            query = query.filter(
+                Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED]),
+                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+            )
+        elif s == "pending":
+            query = query.filter(
+                Conversation.assigned_agent_id.is_(None),
+                Conversation.status != ConversationStatus.AI_HANDLING,
+                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+            )
         elif s == "resolved":
             query = query.filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
         elif s in ("all", "any"):
@@ -162,15 +174,12 @@ def list_conversations_query(
         else:
             query = query.filter(Conversation.status == s)
     elif not q and queue not in ("resolved",):
-        # Default view: show unresolved/active conversations only (hide resolved & closed by default)
+        # Default view: show unresolved/active conversations only (hide resolved, closed & merged)
         query = query.filter(
-            Conversation.status.in_([
-                ConversationStatus.OPEN,
-                ConversationStatus.ASSIGNED,
-                ConversationStatus.PENDING,
-                ConversationStatus.AI_HANDLING,
-                ConversationStatus.WAITING_ON_CUSTOMER,
-                ConversationStatus.ON_HOLD,
+            Conversation.status.notin_([
+                ConversationStatus.RESOLVED,
+                ConversationStatus.CLOSED,
+                ConversationStatus.MERGED,
             ])
         )
 
@@ -178,20 +187,20 @@ def list_conversations_query(
         h = handling.lower().strip()
         if h == "human":
             query = query.filter(
-                or_(
-                    Conversation.assigned_agent_id.isnot(None),
-                    Conversation.status.in_([
-                        ConversationStatus.OPEN,
-                        ConversationStatus.ASSIGNED,
-                        ConversationStatus.WAITING_ON_CUSTOMER,
-                        ConversationStatus.ON_HOLD,
-                    ])
-                )
+                Conversation.assigned_agent_id.isnot(None),
+                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
             )
         elif h == "ai":
             query = query.filter(
                 Conversation.assigned_agent_id.is_(None),
                 Conversation.status == ConversationStatus.AI_HANDLING,
+                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+            )
+        elif h == "pending":
+            query = query.filter(
+                Conversation.assigned_agent_id.is_(None),
+                Conversation.status != ConversationStatus.AI_HANDLING,
+                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
             )
 
     if filter_type:
@@ -691,22 +700,22 @@ def build_conversation_list_item(db: Session, conversation: Conversation, viewer
         .first()
     )
     
-    # Get unread count for customer
-    unread = 0
-    if viewer.role == "customer":
-        unread = db.query(Message).filter(
-            Message.conversation_id == conversation.id,
-            Message.is_internal == False,  # noqa: E712
-            Message.sender_type != MessageSenderType.CUSTOMER,
-            Message.created_at > (conversation.customer_last_read_at or datetime.min.replace(tzinfo=timezone.utc))
-        ).count()
-    elif viewer.role == "agent":
-        unread = db.query(Message).filter(
-            Message.conversation_id == conversation.id,
-            Message.is_internal == False,  # noqa: E712
-            Message.sender_type == MessageSenderType.CUSTOMER,
-            Message.created_at > (conversation.agent_last_read_at or datetime.min.replace(tzinfo=timezone.utc))
-        ).count()
+    # Get unread count for viewer (per-user tracking)
+    unread = compute_unread_count(db, conversation, viewer=viewer)
+    user_read_at = None
+    if viewer:
+        read_rec = (
+            db.query(ConversationUserRead)
+            .filter(
+                ConversationUserRead.conversation_id == conversation.id,
+                ConversationUserRead.user_id == viewer.id,
+            )
+            .first()
+        )
+        if read_rec:
+            user_read_at = read_rec.last_read_at
+        elif viewer.role == "customer":
+            user_read_at = conversation.customer_last_read_at
 
     return {
         "id": conversation.id,
@@ -731,6 +740,7 @@ def build_conversation_list_item(db: Session, conversation: Conversation, viewer
         "last_message": last_msg.content if last_msg else None,
         "last_message_at": last_msg.created_at if last_msg else None,
         "unread_count": unread,
+        "user_last_read_at": user_read_at,
         "merged_into_id": getattr(conversation, "merged_into_id", None),
     }
 
@@ -930,25 +940,125 @@ def get_last_public_message(db: Session, conversation_id: int):
     )
 
 
-def compute_unread_count(db: Session, conversation: Conversation, role: str) -> int:
-    """Compute unread message count for a role."""
+def compute_unread_count(
+    db: Session,
+    conversation: Conversation,
+    role: Optional[str] = None,
+    viewer: Optional[User] = None,
+) -> int:
+    """Compute unread message count for a role or specific viewer."""
+    if viewer:
+        read_rec = (
+            db.query(ConversationUserRead)
+            .filter(
+                ConversationUserRead.conversation_id == conversation.id,
+                ConversationUserRead.user_id == viewer.id,
+            )
+            .first()
+        )
+        if read_rec and read_rec.last_read_at:
+            last_read = read_rec.last_read_at
+        elif viewer.role == "customer":
+            last_read = conversation.customer_last_read_at or datetime.min.replace(tzinfo=timezone.utc)
+        else:
+            last_read = datetime.min.replace(tzinfo=timezone.utc)
+
+        if viewer.role == "customer":
+            return db.query(Message).filter(
+                Message.conversation_id == conversation.id,
+                Message.is_internal == False,  # noqa: E712
+                Message.is_retracted == False,  # noqa: E712
+                Message.sender_type != MessageSenderType.CUSTOMER,
+                Message.created_at > last_read,
+            ).count()
+        else:
+            # For agents / admins: count messages not sent by the viewer
+            return db.query(Message).filter(
+                Message.conversation_id == conversation.id,
+                Message.is_retracted == False,  # noqa: E712
+                or_(Message.sender_id != viewer.id, Message.sender_id.is_(None)),
+                Message.created_at > last_read,
+            ).count()
+
     if role == "customer":
         last_read = conversation.customer_last_read_at or datetime.min.replace(tzinfo=timezone.utc)
         return db.query(Message).filter(
             Message.conversation_id == conversation.id,
             Message.is_internal == False,  # noqa: E712
+            Message.is_retracted == False,  # noqa: E712
             Message.sender_type != MessageSenderType.CUSTOMER,
-            Message.created_at > last_read
+            Message.created_at > last_read,
         ).count()
     elif role == "agent":
         last_read = conversation.agent_last_read_at or datetime.min.replace(tzinfo=timezone.utc)
         return db.query(Message).filter(
             Message.conversation_id == conversation.id,
             Message.is_internal == False,  # noqa: E712
+            Message.is_retracted == False,  # noqa: E712
             Message.sender_type == MessageSenderType.CUSTOMER,
-            Message.created_at > last_read
+            Message.created_at > last_read,
         ).count()
     return 0
+
+
+def mark_conversation_read_for_user(
+    db: Session,
+    conversation_id: int,
+    user: User,
+    last_message_id: Optional[int] = None,
+) -> dict:
+    """Mark a conversation as read for a specific user and track last read message."""
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    now = _utcnow()
+    if not last_message_id:
+        latest = (
+            db.query(Message.id)
+            .filter(Message.conversation_id == conversation_id, Message.is_retracted == False)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .first()
+        )
+        if latest:
+            last_message_id = latest[0]
+
+    read_rec = (
+        db.query(ConversationUserRead)
+        .filter(
+            ConversationUserRead.conversation_id == conversation_id,
+            ConversationUserRead.user_id == user.id,
+        )
+        .first()
+    )
+
+    if read_rec:
+        read_rec.last_read_at = now
+        if last_message_id:
+            read_rec.last_read_message_id = last_message_id
+    else:
+        read_rec = ConversationUserRead(
+            conversation_id=conversation_id,
+            user_id=user.id,
+            last_read_at=now,
+            last_read_message_id=last_message_id,
+        )
+        db.add(read_rec)
+
+    # Maintain backward compatibility on conversation table
+    if user.role in ("agent", "admin", "super_admin"):
+        conversation.agent_last_read_at = now
+    elif user.role == "customer":
+        conversation.customer_last_read_at = now
+
+    db.commit()
+    db.refresh(read_rec)
+    return {
+        "conversation_id": conversation_id,
+        "user_id": user.id,
+        "last_read_at": read_rec.last_read_at,
+        "last_read_message_id": read_rec.last_read_message_id,
+    }
 
 
 def get_linked_conversations_for_conversation(db: Session, conversation_id: int) -> List[dict]:

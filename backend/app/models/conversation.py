@@ -218,6 +218,48 @@ class ConversationLink(Base):
     )
 
 
+class ConversationUserRead(Base):
+    __tablename__ = "conversation_user_reads"
+
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "user_id", name="uq_conv_user_reads"),
+        Index("ix_conv_user_reads_user", "user_id"),
+        Index("ix_conv_user_reads_conv_user", "conversation_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    last_read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=func.now(),
+        nullable=False,
+    )
+
+    last_read_message_id: Mapped[int | None] = mapped_column(
+        nullable=True,
+    )
+
+    conversation = relationship(
+        "Conversation",
+        foreign_keys=[conversation_id],
+    )
+
+    user = relationship(
+        "User",
+        foreign_keys=[user_id],
+    )
+
+
 @event.listens_for(Conversation, "before_insert")
 def set_conversation_chat_id(mapper, connection, target):
     if not target.chat_id:

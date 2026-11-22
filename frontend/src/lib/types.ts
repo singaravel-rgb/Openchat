@@ -92,6 +92,7 @@ export interface ConversationListItem extends Conversation {
   last_message: string | null;
   last_message_at: string | null;
   unread_count: number;
+  user_last_read_at?: string | null;
 }
 
 export interface Message {
@@ -149,6 +150,8 @@ export interface ConversationDetail extends Conversation {
   last_message?: string | null;
   last_message_at?: string | null;
   unread_count?: number;
+  user_last_read_at?: string | null;
+  last_read_message_id?: number | null;
 }
 
 export interface MessageCreate {

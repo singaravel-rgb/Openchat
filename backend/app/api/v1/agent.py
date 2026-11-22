@@ -41,6 +41,7 @@ from app.services.conversation_service import (
     build_conversation_list_item,
     list_conversations_query,
     mark_conversation_read,
+    mark_conversation_read_for_user,
     take_conversation as svc_take,
     resolve_conversation as svc_resolve,
     reopen_conversation as svc_reopen,
@@ -235,9 +236,30 @@ def send_agent_message(
             reference_id=conversation.id,
             priority=NotificationPriority.NORMAL,
         )
+    else:
+        # Private note notification: alert assigned agent if different from note author
+        if conversation.assigned_agent_id and conversation.assigned_agent_id != current_user.id:
+            chat_ref = conversation.chat_id or f"#{conversation.id}"
+            create_notification(
+                db,
+                user_id=conversation.assigned_agent_id,
+                type=NotificationType.NEW_MESSAGE,
+                title=f"New private note in Chat {chat_ref}",
+                message=f"{current_user.full_name}: {data.content[:120]}",
+                reference_type="conversation",
+                reference_id=conversation.id,
+                priority=NotificationPriority.NORMAL,
+            )
 
     db.commit()
     db.refresh(message)
+
+    # Mark as read for this agent
+    try:
+        mark_conversation_read_for_user(db, conversation.id, current_user, last_message_id=message.id)
+    except Exception:
+        pass
+
     return message
 
 

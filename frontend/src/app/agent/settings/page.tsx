@@ -7,6 +7,14 @@ import { Button } from '@/components/Button';
 import { useAuth } from '@/context/AuthContext';
 import { agentApi, authApi } from '@/lib/api';
 import type { AgentWorkload } from '@/lib/types';
+import {
+  getNotificationPreferences,
+  saveNotificationPreferences,
+  requestNotificationPermission,
+  dispatchDesktopNotification,
+  isDesktopNotificationSupported,
+  type DesktopNotificationPreferences,
+} from '@/lib/desktopNotifications';
 
 
 export default function AgentSettingsPage() {
@@ -24,6 +32,56 @@ export default function AgentSettingsPage() {
   const [pwdLoading, setPwdLoading] = useState(false);
   const [pwdError, setPwdError] = useState<string | null>(null);
   const [pwdSuccess, setPwdSuccess] = useState<string | null>(null);
+
+  // Desktop Notifications
+  const [notifPrefs, setNotifPrefs] = useState<DesktopNotificationPreferences>(getNotificationPreferences);
+  const [notifPermission, setNotifPermission] = useState<string>('default');
+  const [notifTestSent, setNotifTestSent] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotifPermission(Notification.permission);
+    }
+  }, []);
+
+  const handleTogglePref = (key: keyof DesktopNotificationPreferences) => {
+    const updated = saveNotificationPreferences({ [key]: !notifPrefs[key] });
+    setNotifPrefs(updated);
+  };
+
+  const handleRequestPermission = async () => {
+    const perm = await requestNotificationPermission();
+    setNotifPermission(perm);
+    if (perm === 'granted') {
+      dispatchDesktopNotification({
+        id: Date.now(),
+        type: 'new_message',
+        title: 'OpenChat Support Notifications Enabled',
+        message: 'You will receive Slack-style desktop notifications for customer messages and assignments.',
+        userRole: 'agent',
+      });
+      setNotifTestSent(true);
+      setTimeout(() => setNotifTestSent(false), 5000);
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    if (notifPermission !== 'granted') {
+      await handleRequestPermission();
+      return;
+    }
+    dispatchDesktopNotification({
+      id: Date.now(),
+      type: 'new_message',
+      title: 'New message from John Smith',
+      message: '"Hi, I need help tracking my latest order #OC-8492. Could someone assist?"',
+      referenceType: 'conversation',
+      referenceId: 1,
+      userRole: 'agent',
+    });
+    setNotifTestSent(true);
+    setTimeout(() => setNotifTestSent(false), 5000);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -238,6 +296,115 @@ export default function AgentSettingsPage() {
             </Button>
           </div>
         </form>
+      </div>
+
+      {/* Desktop Notifications Card */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🔔</span>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">Desktop Notifications</p>
+              <Badge variant={notifPermission === 'granted' ? 'success' : notifPermission === 'denied' ? 'danger' : 'default'} className="text-[10px] capitalize">
+                {notifPermission === 'granted' ? 'Enabled' : notifPermission === 'denied' ? 'Blocked' : 'Default'}
+              </Badge>
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Native browser desktop notifications (Windows Slack style) for real-time customer and workspace activity.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {notifPermission !== 'granted' ? (
+              <Button size="sm" variant="primary" onClick={handleRequestPermission} className="text-xs">
+                Enable Notifications
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={handleSendTestNotification} className="text-xs">
+                {notifTestSent ? '✓ Sent Test' : 'Test Notification'}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+            <div>
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Enable Desktop Alerts</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Show native banners on incoming events</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={notifPrefs.enabled}
+              onChange={() => handleTogglePref('enabled')}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+            <div>
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Alert Sound</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Play notification sound when alerts trigger</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={notifPrefs.sound}
+              onChange={() => handleTogglePref('sound')}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+            <div>
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">New Customer Messages</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Alert on replies from customers</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={notifPrefs.newMessages}
+              onChange={() => handleTogglePref('newMessages')}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+            <div>
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Assignments & Transfers</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Alert when a chat is assigned to you</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={notifPrefs.assignments}
+              onChange={() => handleTogglePref('assignments')}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+            <div>
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Private Notes & Mentions</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Alert on internal notes & @mentions</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={notifPrefs.privateNotes}
+              onChange={() => handleTogglePref('privateNotes')}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="flex items-center justify-between p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+            <div>
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">SLA Warnings & Deadlines</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Urgent alerts before deadline breach</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={notifPrefs.slaBreaches}
+              onChange={() => handleTogglePref('slaBreaches')}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Session Card */}

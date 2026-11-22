@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_roles
@@ -56,36 +56,100 @@ def get_admin_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    total_conversations = db.query(Conversation).count()
-    pending_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.PENDING).count()
-    assigned_conversations = db.query(Conversation).filter(Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN])).count()
-    ai_handling_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.AI_HANDLING).count()
-    resolved_conversations = db.query(Conversation).filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED])).count()
-    closed_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.CLOSED).count()
-    on_hold_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.ON_HOLD).count()
-    waiting_on_customer_conversations = db.query(Conversation).filter(Conversation.status == ConversationStatus.WAITING_ON_CUSTOMER).count()
+    base_unmerged = Conversation.merged_into_id.is_(None)
+    resolved_statuses = [ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]
+
+    total_conversations = db.query(Conversation).filter(base_unmerged).count()
+
+    # Active/unresolved condition: unmerged and not resolved/closed/merged
+    unresolved_cond = and_(
+        base_unmerged,
+        Conversation.status.notin_(resolved_statuses),
+    )
+    total_unresolved = db.query(Conversation).filter(unresolved_cond).count()
+
+    # Partition 1: AI Handling (unresolved, unassigned, status == ai_handling)
+    ai_handling_conversations = (
+        db.query(Conversation)
+        .filter(
+            unresolved_cond,
+            Conversation.assigned_agent_id.is_(None),
+            Conversation.status == ConversationStatus.AI_HANDLING,
+        )
+        .count()
+    )
+
+    # Partition 2: Human Handling (unresolved, assigned_agent_id is not null)
+    human_handled_conversations = (
+        db.query(Conversation)
+        .filter(
+            unresolved_cond,
+            Conversation.assigned_agent_id.isnot(None),
+        )
+        .count()
+    )
+
+    # Partition 3: Pending (unresolved, unassigned, status != ai_handling)
+    pending_conversations = (
+        db.query(Conversation)
+        .filter(
+            unresolved_cond,
+            Conversation.assigned_agent_id.is_(None),
+            Conversation.status != ConversationStatus.AI_HANDLING,
+        )
+        .count()
+    )
+
+    # Partition 4: Resolved (unmerged, status in (resolved, closed))
+    resolved_conversations = (
+        db.query(Conversation)
+        .filter(
+            base_unmerged,
+            Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]),
+        )
+        .count()
+    )
+    closed_conversations = (
+        db.query(Conversation)
+        .filter(
+            base_unmerged,
+            Conversation.status == ConversationStatus.CLOSED,
+        )
+        .count()
+    )
+
+    # Secondary breakdowns
+    assigned_conversations = human_handled_conversations
+    on_hold_conversations = (
+        db.query(Conversation)
+        .filter(unresolved_cond, Conversation.status == ConversationStatus.ON_HOLD)
+        .count()
+    )
+    waiting_on_customer_conversations = (
+        db.query(Conversation)
+        .filter(unresolved_cond, Conversation.status == ConversationStatus.WAITING_ON_CUSTOMER)
+        .count()
+    )
 
     ai_resolved_conversations = (
         db.query(Conversation)
         .filter(
+            base_unmerged,
             Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]),
             Conversation.assigned_agent_id.is_(None),
         )
         .count()
     )
-    human_handled_conversations = (
-        db.query(Conversation)
-        .filter(
-            (Conversation.assigned_agent_id.isnot(None)) | (Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN, ConversationStatus.PENDING]))
-        )
-        .count()
-    )
+
     missed_deadlines = (
         db.query(Conversation)
-        .filter(Conversation.sla_response_breached == True)
+        .filter(unresolved_cond, Conversation.sla_response_breached == True)  # noqa: E712
         .count()
     )
     escalation_rate = round((human_handled_conversations / total_conversations * 100), 1) if total_conversations > 0 else 0.0
+
+    unassigned_conversations = ai_handling_conversations + pending_conversations
+    unanswered_conversations = pending_conversations
 
     total_agents = db.query(User).filter(User.role == "agent", User.is_active == True).count()  # noqa: E712
     available_agents = (
@@ -100,30 +164,19 @@ def get_admin_stats(
     today = datetime.utcnow().date()
     conversations_today = (
         db.query(Conversation)
-        .filter(func.date(Conversation.created_at) == today)
+        .filter(base_unmerged, func.date(Conversation.created_at) == today)
         .count()
     )
 
     avg_resolution_time = None
     resolved_convs = (
         db.query(Conversation)
-        .filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
+        .filter(base_unmerged, Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
         .all()
     )
     if resolved_convs:
         total_hours = sum((c.updated_at - c.created_at).total_seconds() / 3600 for c in resolved_convs)
         avg_resolution_time = round(total_hours / len(resolved_convs), 2)
-
-    unassigned_conversations = (
-        db.query(Conversation)
-        .filter(
-            Conversation.assigned_agent_id.is_(None),
-            Conversation.status.in_([ConversationStatus.PENDING, ConversationStatus.OPEN, ConversationStatus.AI_HANDLING]),
-        )
-        .count()
-    )
-    total_unresolved = db.query(Conversation).filter(Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED])).count()
-    unanswered_conversations = db.query(Conversation).filter(Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED, ConversationStatus.PENDING])).count()
 
     return {
         "conversations": {

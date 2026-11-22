@@ -1,9 +1,6 @@
 name: Deploy to AWS Staging
 
 on:
-  push:
-    branches:
-      - 'release/*'
   workflow_dispatch:
     inputs:
       reason:

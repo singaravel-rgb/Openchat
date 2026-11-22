@@ -51,9 +51,150 @@
     retryCount: 0,
     offline: !navigator.onLine,
     activeTab: 'chat',
-    selectedAttachment: null
+    selectedAttachment: null,
+    showEmojiPicker: false,
+    emojiCategory: 'all',
+    emojiSearch: ''
   };
   window.__openchatState = state;
+
+  var EMOJI_CATEGORIES = {
+    smileys: [
+      { char: '😀', name: 'grinning face' },
+      { char: '😃', name: 'smiling face' },
+      { char: '😄', name: 'smiling face open mouth' },
+      { char: '😁', name: 'grinning face smiling eyes' },
+      { char: '😆', name: 'laughing face' },
+      { char: '😅', name: 'sweat smile' },
+      { char: '😂', name: 'joy tears' },
+      { char: '🤣', name: 'rofl' },
+      { char: '😊', name: 'smiling eyes' },
+      { char: '😇', name: 'halo angel' },
+      { char: '🙂', name: 'slightly smiling' },
+      { char: '😉', name: 'wink' },
+      { char: '😌', name: 'relieved' },
+      { char: '😍', name: 'heart eyes' },
+      { char: '🥰', name: 'smiling hearts' },
+      { char: '😘', name: 'kiss' },
+      { char: '😋', name: 'yum delicious' },
+      { char: '😛', name: 'tongue' },
+      { char: '😜', name: 'wink tongue' },
+      { char: '🤔', name: 'thinking' },
+      { char: '🤫', name: 'shush quiet' },
+      { char: '🤐', name: 'zipper' },
+      { char: '😎', name: 'cool sunglasses' },
+      { char: '🤓', name: 'nerd' },
+      { char: '🧐', name: 'monocle' },
+      { char: '😐', name: 'neutral' },
+      { char: '😑', name: 'expressionless' },
+      { char: '😶', name: 'no mouth' },
+      { char: '😏', name: 'smirk' },
+      { char: '😒', name: 'unamused' },
+      { char: '🙄', name: 'rolling eyes' },
+      { char: '😬', name: 'grimace' },
+      { char: '😔', name: 'pensive sad' },
+      { char: '😴', name: 'sleep' },
+      { char: '😷', name: 'mask sick' },
+      { char: '🤒', name: 'thermometer fever' },
+      { char: '🥺', name: 'pleading eyes' },
+      { char: '😢', name: 'crying' },
+      { char: '😭', name: 'sob loud crying' },
+      { char: '😱', name: 'scream shock' },
+      { char: '😤', name: 'steam nose proud' },
+      { char: '😡', name: 'rage angry' },
+      { char: '😠', name: 'mad angry' }
+    ],
+    gestures: [
+      { char: '👍', name: 'thumbs up ok yes' },
+      { char: '👎', name: 'thumbs down no' },
+      { char: '👌', name: 'ok hand' },
+      { char: '✌️', name: 'peace victory' },
+      { char: '🤞', name: 'crossed fingers hope' },
+      { char: '🤟', name: 'love you' },
+      { char: '🤘', name: 'rock on horns' },
+      { char: '🤙', name: 'call me' },
+      { char: '👈', name: 'point left' },
+      { char: '👉', name: 'point right' },
+      { char: '👆', name: 'point up' },
+      { char: '👇', name: 'point down' },
+      { char: '☝️', name: 'one point' },
+      { char: '👏', name: 'applause clapping' },
+      { char: '🙌', name: 'raising hands praise' },
+      { char: '👐', name: 'open hands' },
+      { char: '🤲', name: 'palms together' },
+      { char: '🤝', name: 'handshake deal' },
+      { char: '🙏', name: 'praying folded hands thank you' },
+      { char: '✍️', name: 'writing hand' },
+      { char: '💅', name: 'nail polish' },
+      { char: '🤳', name: 'selfie' },
+      { char: '💪', name: 'muscle strong flex' },
+      { char: '👋', name: 'wave hello bye' }
+    ],
+    hearts: [
+      { char: '❤️', name: 'red heart love' },
+      { char: '🧡', name: 'orange heart' },
+      { char: '💛', name: 'yellow heart' },
+      { char: '💚', name: 'green heart' },
+      { char: '💙', name: 'blue heart' },
+      { char: '💜', name: 'purple heart' },
+      { char: '🖤', name: 'black heart' },
+      { char: '🤍', name: 'white heart' },
+      { char: '🤎', name: 'brown heart' },
+      { char: '💔', name: 'broken heart' },
+      { char: '❣️', name: 'heart exclamation' },
+      { char: '💕', name: 'two hearts' },
+      { char: '💞', name: 'revolving hearts' },
+      { char: '💓', name: 'beating heart' },
+      { char: '💗', name: 'growing heart' },
+      { char: '💖', name: 'sparkle heart' },
+      { char: '💘', name: 'heart arrow cupid' },
+      { char: '💝', name: 'gift heart' }
+    ],
+    objects: [
+      { char: '🎉', name: 'party popper celebrate' },
+      { char: '🎊', name: 'confetti' },
+      { char: '🎈', name: 'balloon' },
+      { char: '🎁', name: 'gift present' },
+      { char: '🏆', name: 'trophy winner' },
+      { char: '🥇', name: 'first place gold' },
+      { char: '⚽️', name: 'soccer football' },
+      { char: '🏀', name: 'basketball' },
+      { char: '☕️', name: 'coffee tea' },
+      { char: '🍻', name: 'beer cheer' },
+      { char: '🍕', name: 'pizza food' },
+      { char: '📦', name: 'package box delivery' },
+      { char: '💳', name: 'credit card payment' },
+      { char: '💡', name: 'lightbulb idea' },
+      { char: '📌', name: 'pushpin note' },
+      { char: '📎', name: 'paperclip attach' },
+      { char: '🔥', name: 'fire hot lit' },
+      { char: '✨', name: 'sparkles magic shiny' },
+      { char: '⭐', name: 'star favorite' },
+      { char: '💯', name: 'hundred percent perfect' },
+      { char: '⚠️', name: 'warning alert' },
+      { char: 'ℹ️', name: 'info information' },
+      { char: '❓', name: 'question mark help' },
+      { char: '❗️', name: 'exclamation mark' },
+      { char: '✅', name: 'check mark done yes' },
+      { char: '❌', name: 'cross mark cancel no' }
+    ]
+  };
+
+  function getFilteredEmojis(cat, search) {
+    var all = [];
+    if (!cat || cat === 'all') {
+      Object.keys(EMOJI_CATEGORIES).forEach(function(k){
+        all = all.concat(EMOJI_CATEGORIES[k]);
+      });
+    } else if (EMOJI_CATEGORIES[cat]) {
+      all = EMOJI_CATEGORIES[cat];
+    }
+    if (!search || !search.trim()) return all;
+    var q = search.toLowerCase().trim();
+    return all.filter(function(e){
+      return e.name.toLowerCase().indexOf(q) !== -1 || e.char.indexOf(q) !== -1;
+    });
+  }
 
   var shadowRoot = null;
   var rootHostEl = null;
@@ -306,6 +447,7 @@
     render();
     try {
       state.detail = await api('/conversations/' + id);
+      api('/conversations/' + id + '/read', { method: 'POST' }).catch(function(){});
       await loadConversations();
       clearError();
     } catch(e){
@@ -554,10 +696,21 @@
     var cursorStart = existingInput ? existingInput.selectionStart : 0;
     var cursorEnd = existingInput ? existingInput.selectionEnd : 0;
 
+    var totalUnread = 0;
+    if (state.conversations && state.conversations.length) {
+      state.conversations.forEach(function(c){ if (c.unread_count) totalUnread += c.unread_count; });
+    }
+    var unreadBadgeHtml = '';
+    if (totalUnread > 0) {
+      unreadBadgeHtml = '<span class="ocw-launcher-badge" style="position:absolute;top:-4px;right:-4px;background:#25D366;color:#fff;font-size:11px;font-weight:700;border-radius:9999px;padding:2px 6px;min-width:20px;height:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,0.2);border:2px solid #fff;">' + (totalUnread > 99 ? '99+' : totalUnread) + '</span>';
+    }
+
     var launcher = !state.open ?
-      '<button class="ocw-launcher ' + pos + '" id="ocw-launch" style="background:' + esc(primary) + '" aria-label="Open chat">' +
+      '<button class="ocw-launcher ' + pos + '" id="ocw-launch" style="background:' + esc(primary) + ';position:relative;" aria-label="Open chat">' +
       '<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></button>' : '';
+      '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>' +
+      unreadBadgeHtml +
+      '</button>' : '';
 
     var panel = '';
     if (state.open) {
@@ -583,11 +736,15 @@
               var statusBg = isResolved ? '#dcfce7;color:#166534' : (c.status === 'open' ? '#dbeafe;color:#1e40af' : '#fef3c7;color:#92400e');
               var chatIdBadge = c.chat_id ? '<span style="font-family:monospace;font-size:10px;padding:2px 6px;border-radius:4px;background:#f1f5f9;color:#475569;font-weight:600;">' + esc(c.chat_id) + '</span>' : '';
               var statusBadge = '<span style="font-size:10px;padding:2px 7px;border-radius:9999px;font-weight:600;background:' + statusBg + ';">' + esc(c.status) + '</span>';
+              var hasUnread = (c.unread_count && c.unread_count > 0);
+              var unreadBadge = hasUnread ? '<span style="background:#25D366;color:#fff;font-size:10px;font-weight:700;border-radius:9999px;padding:2px 6px;margin-left:6px;min-width:18px;text-align:center;">' + (c.unread_count > 99 ? '99+' : c.unread_count) + '</span>' : '';
+              var cardBorder = hasUnread ? 'border:1.5px solid #86efac;background:#f0fdf4;' : 'background:#fff;border:1px solid #e2e8f0;';
+              var lastMsgStyle = hasUnread ? 'font-weight:700;color:#0f172a;' : 'color:#64748b;';
 
-              panel += '<div class="ocw-chat-item" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;">';
-              panel += '<div style="display:flex;justify-content:space-between;align-items:center;">' + chatIdBadge + statusBadge + '</div>';
+              panel += '<div class="ocw-chat-item" style="' + cardBorder + 'border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;">';
+              panel += '<div style="display:flex;justify-content:space-between;align-items:center;"><div style="display:flex;align-items:center;gap:4px;">' + chatIdBadge + unreadBadge + '</div>' + statusBadge + '</div>';
               panel += '<div style="font-weight:600;font-size:12px;color:#1e293b;cursor:pointer;" class="ocw-conv-open" data-id="' + c.id + '">' + esc(c.subject || 'Support Conversation') + '</div>';
-              panel += '<div style="font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" class="ocw-conv-open" data-id="' + c.id + '">' + esc(c.last_message || 'No messages yet') + '</div>';
+              panel += '<div style="font-size:11px;' + lastMsgStyle + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" class="ocw-conv-open" data-id="' + c.id + '">' + esc(c.last_message || 'No messages yet') + '</div>';
               panel += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;border-top:1px solid #f8fafc;padding-top:4px;">';
               panel += '<span style="font-size:10px;color:#94a3b8;">' + fmtTime(c.updated_at || c.created_at) + '</span>';
               if (isResolved) {
@@ -698,11 +855,40 @@
             panel += '<button type="button" id="ocw-remove-attach" style="background:none;border:none;cursor:pointer;font-size:14px;color:#ef4444;padding:2px 6px;" title="Remove image">✕</button>';
             panel += '</div>';
           }
-          panel += '<div style="display:flex;gap:6px;align-items:flex-end;">';
+          panel += '<div style="display:flex;gap:6px;align-items:flex-end;position:relative;">';
           panel += '<button type="button" id="ocw-attach-btn" title="Attach image (PNG, JPG, max 10MB)" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:14px;color:#475569;height:42px;display:flex;align-items:center;justify-content:center;">📎</button>';
+          panel += '<button type="button" id="ocw-emoji-btn" title="Add emoji" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:16px;color:#475569;height:42px;display:flex;align-items:center;justify-content:center;">😀</button>';
           panel += '<input type="file" id="ocw-file-input" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" style="display:none;"/>';
           panel += '<textarea id="ocw-text" class="ocw-input" placeholder="Type a message or /help…" style="flex:1;min-height:42px;height:42px;"></textarea>';
           panel += '<button class="ocw-btn ocw-btn-primary" id="ocw-send" style="background:' + esc(primary) + (state.sending ? ';opacity:0.6;cursor:not-allowed;' : '') + ';height:42px;padding:0 14px;font-weight:600;"' + (state.sending ? ' disabled' : '') + '>' + (state.sending ? '...' : 'Send') + '</button>';
+
+          if (state.showEmojiPicker) {
+            panel += '<div id="ocw-emoji-picker" style="position:absolute;bottom:48px;left:0;right:0;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,0.18);padding:10px;z-index:2147483010;display:flex;flex-direction:column;gap:6px;">';
+            panel += '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;border-bottom:1px solid #f1f5f9;padding-bottom:6px;">';
+            panel += '<input type="text" id="ocw-emoji-search" placeholder="Search emojis..." value="' + esc(state.emojiSearch || '') + '" style="flex:1;border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:12px;outline:none;" />';
+            panel += '<button type="button" id="ocw-emoji-close" style="background:none;border:none;font-size:16px;cursor:pointer;color:#64748b;line-height:1;padding:2px 4px;">✕</button>';
+            panel += '</div>';
+            panel += '<div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;border-bottom:1px solid #f8fafc;">';
+            var cats = [
+              { id: "all", label: "All" },
+              { id: "smileys", label: "😀 Smileys" },
+              { id: "gestures", label: "👍 Gestures" },
+              { id: "hearts", label: "❤️ Hearts" },
+              { id: "objects", label: "🎉 Objects" }
+            ];
+            cats.forEach(function(cat){
+              var isCat = (state.emojiCategory || 'all') === cat.id;
+              panel += '<button type="button" class="ocw-emoji-cat" data-cat="' + cat.id + '" style="border:none;background:' + (isCat ? '#e0f2fe;color:#0369a1;' : '#f1f5f9;color:#475569;') + 'border-radius:4px;padding:3px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">' + cat.label + '</button>';
+            });
+            panel += '</div>';
+            panel += '<div id="ocw-emoji-grid" style="display:grid;grid-template-columns:repeat(8, 1fr);gap:4px;max-height:150px;overflow-y:auto;padding-top:4px;">';
+            var emList = getFilteredEmojis(state.emojiCategory || 'all', state.emojiSearch || '');
+            emList.forEach(function(em){
+              panel += '<button type="button" class="ocw-emoji-item" data-emoji="' + em.char + '" title="' + esc(em.name) + '" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;border-radius:6px;text-align:center;">' + em.char + '</button>';
+            });
+            panel += '</div>';
+            panel += '</div>';
+          }
           panel += '</div>';
           panel += '</div>';
         }
@@ -832,6 +1018,70 @@
         render();
       };
     }
+    var emojiBtn = $('#ocw-emoji-btn');
+    if (emojiBtn) {
+      emojiBtn.onclick = function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        state.showEmojiPicker = !state.showEmojiPicker;
+        render();
+      };
+    }
+    var emojiClose = $('#ocw-emoji-close');
+    if (emojiClose) {
+      emojiClose.onclick = function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        state.showEmojiPicker = false;
+        render();
+      };
+    }
+    var emojiSearchInput = $('#ocw-emoji-search');
+    if (emojiSearchInput) {
+      emojiSearchInput.oninput = function(e){
+        state.emojiSearch = e.target.value;
+        var grid = $('#ocw-emoji-grid');
+        if (grid) {
+          var emList = getFilteredEmojis(state.emojiCategory || 'all', state.emojiSearch || '');
+          var gh = '';
+          emList.forEach(function(em){
+            gh += '<button type="button" class="ocw-emoji-item" data-emoji="' + em.char + '" title="' + esc(em.name) + '" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;border-radius:6px;text-align:center;">' + em.char + '</button>';
+          });
+          grid.innerHTML = gh;
+          bindEmojiItems();
+        }
+      };
+    }
+    var catBtns = $$('.ocw-emoji-cat');
+    catBtns.forEach(function(btn){
+      btn.onclick = function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        state.emojiCategory = btn.getAttribute('data-cat');
+        render();
+      };
+    });
+    function bindEmojiItems(){
+      var emojiBtns = $$('.ocw-emoji-item');
+      emojiBtns.forEach(function(btn){
+        btn.onclick = function(e){
+          e.preventDefault();
+          e.stopPropagation();
+          var em = btn.getAttribute('data-emoji');
+          var ta = $('#ocw-text');
+          if (ta && em) {
+            var start = ta.selectionStart || 0;
+            var end = ta.selectionEnd || 0;
+            var val = ta.value;
+            ta.value = val.substring(0, start) + em + val.substring(end);
+            ta.selectionStart = ta.selectionEnd = start + em.length;
+            state.draft = ta.value;
+            ta.focus();
+          }
+        };
+      });
+    }
+    bindEmojiItems();
     var reopenBtns = $$('.ocw-reopen-btn');
     reopenBtns.forEach(function(btn){
       btn.onclick = function(e){

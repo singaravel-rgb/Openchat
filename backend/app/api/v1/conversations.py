@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_current_user
 from app.core.enums import ConversationStatus, MessageSenderType
 from app.db.session import get_db
-from app.models.conversation import Conversation
+from app.models.conversation import Conversation, ConversationUserRead
 from app.models.csat import CSATRating
 from app.models.message import Message
 from app.models.user import User
@@ -22,6 +22,7 @@ from app.schemas.conversation import (
     ConversationUpdate,
     GlobalNoteUpdate,
     ConversationLinkItem,
+    MarkReadRequest,
 )
 from app.schemas.csat import CSATRatingCreate, CSATRatingResponse
 from app.services.conversation_service import (
@@ -31,6 +32,7 @@ from app.services.conversation_service import (
     build_conversation_list_item,
     list_conversations_query,
     mark_conversation_read,
+    mark_conversation_read_for_user,
     update_conversation_properties,
     reopen_conversation,
     update_global_note,
@@ -114,6 +116,21 @@ def get_conversation(
 
     item = build_conversation_list_item(db, conversation, viewer=current_user)
 
+    user_read_at = item.get("user_last_read_at")
+    last_read_msg_id = None
+    if current_user:
+        read_rec = (
+            db.query(ConversationUserRead)
+            .filter(
+                ConversationUserRead.conversation_id == conversation.id,
+                ConversationUserRead.user_id == current_user.id,
+            )
+            .first()
+        )
+        if read_rec:
+            user_read_at = read_rec.last_read_at
+            last_read_msg_id = read_rec.last_read_message_id
+
     return ConversationDetail(
         id=conversation.id,
         chat_id=conversation.chat_id,
@@ -131,6 +148,8 @@ def get_conversation(
         closed_at=getattr(conversation, "closed_at", None),
         customer_last_read_at=getattr(conversation, "customer_last_read_at", None),
         agent_last_read_at=getattr(conversation, "agent_last_read_at", None),
+        user_last_read_at=user_read_at,
+        last_read_message_id=last_read_msg_id,
         assignment_history=getattr(conversation, "assignment_history", []) or [],
         global_note=conversation.global_note if include_internal else None,
         global_note_updated_at=conversation.global_note_updated_at if include_internal else None,
@@ -149,6 +168,23 @@ def get_conversation(
             for l in get_linked_conversations_for_conversation(db, conversation.id)
         ] if include_internal else None,
     )
+
+
+@router.post("/{conversation_id}/read")
+def mark_conversation_as_read(
+    conversation_id: int,
+    data: Optional[MarkReadRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Mark conversation as read for the current user and track last read message."""
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    ensure_can_view(current_user, conversation)
+    last_msg_id = data.last_message_id if data else None
+    result = mark_conversation_read_for_user(db, conversation_id, current_user, last_message_id=last_msg_id)
+    return {"status": "ok", **result}
 
 
 @router.post("/{conversation_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)

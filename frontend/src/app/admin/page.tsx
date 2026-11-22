@@ -183,17 +183,8 @@ export default function AdminDashboardPage() {
               Open Workspace →
             </Link>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Link href="/admin/conversations?status=open" className="block group">
-              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
-                <CardContent className="p-5">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Unresolved</p>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{stats?.conversations.total_unresolved ?? stats?.conversations.total ?? 0}</p>
-                </CardContent>
-              </Card>
-            </Link>
-
-            <Link href="/admin/conversations" className="block group">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Link href="/admin/conversations?handling=ai" className="block group">
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">AI Handling</p>

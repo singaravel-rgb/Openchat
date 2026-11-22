@@ -1,8 +1,13 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { notificationApi } from '@/lib/api';
 import type { Notification, NotificationList } from '@/lib/types';
+import {
+  registerNotificationServiceWorker,
+  dispatchDesktopNotification,
+  isDesktopNotificationSupported,
+} from '@/lib/desktopNotifications';
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -19,6 +24,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const knownNotificationIdsRef = useRef<Set<number>>(new Set());
+  const isInitialLoadRef = useRef(true);
 
   const fetchNotifications = async (silent = false) => {
     // Poll silently: before the auth token is hydrated (login/refresh) the API
@@ -36,6 +43,30 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       ]);
       setNotifications(listResult.notifications);
       setUnreadCount(countResult.unread_count);
+
+      // Check for new unread notifications to dispatch desktop notifications
+      if (listResult.notifications && listResult.notifications.length > 0) {
+        if (isInitialLoadRef.current) {
+          listResult.notifications.forEach((n) => knownNotificationIdsRef.current.add(n.id));
+          isInitialLoadRef.current = false;
+        } else {
+          for (const n of listResult.notifications) {
+            if (!knownNotificationIdsRef.current.has(n.id)) {
+              knownNotificationIdsRef.current.add(n.id);
+              if (!n.is_read) {
+                dispatchDesktopNotification({
+                  id: n.id,
+                  type: n.type,
+                  title: n.title,
+                  message: n.message || '',
+                  referenceType: n.reference_type || undefined,
+                  referenceId: n.reference_id,
+                });
+              }
+            }
+          }
+        }
+      }
     } catch (error) {
       // 401 triggers a redirect in the API client; ignore transient failures.
     } finally {
@@ -66,6 +97,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    registerNotificationServiceWorker();
     fetchNotifications();
 
     const intervalId = setInterval(() => {

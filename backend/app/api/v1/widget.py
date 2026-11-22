@@ -28,6 +28,7 @@ import secrets
 from app.services.conversation_service import (
     process_customer_message, append_assignment_history, record_system_event,
     get_last_public_message, compute_unread_count, generate_chat_id,
+    mark_conversation_read_for_user,
 )
 from app.services.assignment_service import assign_conversation_to_agent
 from app.services.sla_service import apply_sla_to_conversation
@@ -379,9 +380,28 @@ def get_conversation(
     # mark read
     from datetime import datetime, timezone
     conversation.customer_last_read_at = datetime.now(timezone.utc)
+    mark_conversation_read_for_user(db, conversation.id, user)
     db.commit()
     db.refresh(conversation)
     return WidgetConversationDetail(**_conv_to_widget(conversation, db).model_dump(), messages=[_msg_to_widget(m) for m in messages])
+
+
+@router.post("/conversations/{conversation_id}/read")
+def mark_widget_conversation_read(
+    conversation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_widget_session: str | None = Header(None),
+):
+    rate_limit_for_request(request, "widget:conv:read", 120, 60)
+    cfg = _cfg_or_503(db)
+    validate_widget_origin(cfg, request, require_when_configured=True)
+    _, user = require_widget_session(db, request, x_widget_session)
+    conversation = db.query(Conversation).filter(Conversation.id == conversation_id, Conversation.customer_id == user.id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    res = mark_conversation_read_for_user(db, conversation.id, user)
+    return {"status": "ok", **res}
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=WidgetMessage, status_code=status.HTTP_201_CREATED)

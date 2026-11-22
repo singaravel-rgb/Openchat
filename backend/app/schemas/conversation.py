@@ -132,6 +132,8 @@ class ConversationDetail(ConversationResponse):
     last_message: Optional[str] = None
     last_message_at: Optional[datetime] = None
     unread_count: int = 0
+    user_last_read_at: Optional[datetime] = None
+    last_read_message_id: Optional[int] = None
     merged_into_id: Optional[int] = None
     linked_conversations: Optional[List[ConversationLinkItem]] = None
 
@@ -154,7 +156,12 @@ class ConversationListItem(BaseModel):
     last_message: Optional[str]
     last_message_at: Optional[datetime]
     unread_count: int = 0
+    user_last_read_at: Optional[datetime] = None
     merged_into_id: Optional[int] = None
+
+
+class MarkReadRequest(BaseModel):
+    last_message_id: Optional[int] = None
 
 
 class ConversationListResponse(BaseModel):
