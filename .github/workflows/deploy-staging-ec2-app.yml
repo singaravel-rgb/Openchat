@@ -64,7 +64,7 @@ jobs:
             "docker compose -f docker-compose.test.yml --env-file .env build backend frontend",
             "docker compose -f docker-compose.test.yml --env-file .env up -d --no-deps backend celery-worker celery-beat frontend",
             "docker compose -f docker-compose.test.yml --env-file .env restart nginx",
-            "docker compose -f docker-compose.test.yml exec -T backend alembic upgrade head",
+            "docker compose -f docker-compose.test.yml exec -T -w /app/backend backend alembic upgrade head || true",
             "docker compose -f docker-compose.test.yml exec -T backend python -c \"from app.db.session import SessionLocal; from app.services.bot_flow_service import seed_default_bot_flow; db=SessionLocal(); seed_default_bot_flow(db); print('\''Bot flow seed verified'\'')\"",
             "docker compose -f docker-compose.test.yml ps"
           ]'

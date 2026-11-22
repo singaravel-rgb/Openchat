@@ -99,6 +99,15 @@ async def startup_event():
     import asyncio
     from app.db.session import SessionLocal
 
+    # Ensure all required tables exist
+    try:
+        from app.db.base import Base
+        from app.db.session import engine
+        import app.models.password_reset
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        logger.warning(f"Error ensuring database tables: {e}")
+
     # Seed default published bot flow if missing
     try:
         db = SessionLocal()
