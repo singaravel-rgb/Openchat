@@ -121,6 +121,8 @@ jobs:
           import urllib.request, json
           res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/health', timeout=15)
           print('Health Check Status:', res.getcode(), res.read().decode())
-          tree_res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/api/v1/bot-flows/1/tree', timeout=15)
-          print('Bot Flow Tree Status:', tree_res.getcode())
+          cfg_res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/api/v1/widget/config', timeout=15)
+          print('Widget Config Status:', cfg_res.getcode())
+          embed_res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/api/v1/widget/embed.js', timeout=15)
+          print('Widget Embed Status:', embed_res.getcode())
           "
