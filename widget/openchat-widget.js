@@ -649,7 +649,7 @@
     var pos = (cfg.launcher_position === 'bottom-left') ? 'ocw-left' : 'ocw-right';
     var primary = cfg.primary_color || '#2563eb';
 
-    var hide = isHelpPage(cfg);
+    var hide = isHelpPage(cfg) && !state.open;
     var contentDiv = shadowRoot.querySelector('#ocw-content');
     if (!contentDiv) {
       contentDiv = document.createElement('div');
@@ -1190,6 +1190,39 @@
       logError('Session check during init', e);
     }
   }
+
+  window.OpenChat = {
+    open: function() {
+      state.open = true;
+      render();
+      ensureSession().then(async function() {
+        await loadConversations();
+        render();
+        startPolling();
+      }).catch(function(err){
+        logError('OpenChat.open', err);
+      });
+    },
+    close: function() {
+      state.open = false;
+      stopPolling();
+      render();
+    },
+    newChat: function() {
+      state.open = true;
+      state.activeTab = 'chat';
+      state.detail = null;
+      state.activeId = null;
+      render();
+      startConversation();
+    }
+  };
+
+  try {
+    window.addEventListener('openchat:open', function() {
+      window.OpenChat.open();
+    });
+  } catch (e) {}
 
   function startWhenReady() {
     if (document.readyState === 'loading') {

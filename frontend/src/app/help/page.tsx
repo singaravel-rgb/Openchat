@@ -80,15 +80,20 @@ export default function HelpPage() {
   }, [data, searchQuery, activeCategory]);
 
   const handleStartChat = () => {
-    // Trigger the widget to open if it's embedded on this page
     if (typeof window !== 'undefined') {
-      const launchBtn = document.querySelector('#ocw-launch') as HTMLElement;
-      if (launchBtn) {
-        launchBtn.click();
-      } else {
-        // Widget not loaded - show a message or redirect to a contact page
-        alert('Chat widget is not available on this page. Please check the widget configuration.');
+      if ((window as any).OpenChat && typeof (window as any).OpenChat.open === 'function') {
+        (window as any).OpenChat.open();
+        return;
       }
+      const host = document.querySelector('#openchat-widget-root') as any;
+      if (host && host.shadowRoot) {
+        const launchBtn = host.shadowRoot.querySelector('#ocw-launch') as HTMLElement;
+        if (launchBtn) {
+          launchBtn.click();
+          return;
+        }
+      }
+      window.dispatchEvent(new CustomEvent('openchat:open'));
     }
   };
 
