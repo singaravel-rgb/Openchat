@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_, distinct, text, select
+from sqlalchemy import func, or_, and_, distinct, text, select, exists
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
@@ -18,6 +18,20 @@ from app.services.sla_service import apply_sla_to_conversation
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def get_unread_customer_message_condition():
+    """SQL condition identifying active unresolved conversations with an unread customer message requiring attention/response."""
+    return and_(
+        Message.conversation_id == Conversation.id,
+        Message.sender_type == MessageSenderType.CUSTOMER,
+        Message.is_internal == False,
+        Message.is_retracted == False,
+        or_(
+            Conversation.agent_last_read_at.is_(None),
+            Message.created_at > Conversation.agent_last_read_at,
+        ),
+    )
 
 
 def generate_chat_id(db: Session) -> str:
@@ -155,19 +169,18 @@ def list_conversations_query(
     query = query.filter(Conversation.merged_into_id.is_(None))
 
     resolved_statuses = [ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]
-    pending_statuses = [ConversationStatus.PENDING, ConversationStatus.ON_HOLD, ConversationStatus.WAITING_ON_CUSTOMER]
+    has_unread_customer_msg = exists().where(get_unread_customer_message_condition())
 
     if status_filter:
         s = status_filter.lower().strip()
         if s == "open":
             query = query.filter(
-                Conversation.assigned_agent_id.is_(None),
-                Conversation.status.notin_([ConversationStatus.AI_HANDLING] + pending_statuses + resolved_statuses),
+                Conversation.status.notin_(resolved_statuses),
+                has_unread_customer_msg,
             )
         elif s == "pending":
             query = query.filter(
-                Conversation.status.in_(pending_statuses),
-                Conversation.status.notin_(resolved_statuses),
+                Conversation.status == ConversationStatus.PENDING,
             )
         elif s == "all_unresolved":
             query = query.filter(
@@ -190,7 +203,8 @@ def list_conversations_query(
         if h == "human":
             query = query.filter(
                 Conversation.assigned_agent_id.isnot(None),
-                Conversation.status.notin_(pending_statuses + resolved_statuses),
+                Conversation.status != ConversationStatus.PENDING,
+                Conversation.status.notin_(resolved_statuses),
             )
         elif h == "ai":
             query = query.filter(
@@ -200,7 +214,7 @@ def list_conversations_query(
             )
         elif h == "pending":
             query = query.filter(
-                Conversation.status.in_(pending_statuses),
+                Conversation.status == ConversationStatus.PENDING,
                 Conversation.status.notin_(resolved_statuses),
             )
 
@@ -333,11 +347,10 @@ def transition_status(
     if conversation.assigned_agent_id and new_status in (
         ConversationStatus.RESOLVED,
         ConversationStatus.CLOSED,
-        ConversationStatus.PENDING,
         ConversationStatus.ON_HOLD,
     ):
         release_agent_capacity(db, conversation.assigned_agent_id)
-        if new_status in (ConversationStatus.PENDING, ConversationStatus.ON_HOLD):
+        if new_status == ConversationStatus.ON_HOLD:
             conversation.assigned_agent_id = None
 
     conversation.status = new_status
@@ -566,8 +579,7 @@ def add_message(
             conversation.customer_last_read_at = _utcnow()
             # If conversation was waiting_on_customer, customer reply makes it eligible for handling again
             if conversation.status == ConversationStatus.WAITING_ON_CUSTOMER:
-                new_st = ConversationStatus.OPEN if conversation.assigned_agent_id else ConversationStatus.PENDING
-                transition_status(db, conversation, new_st.value, sender)
+                transition_status(db, conversation, ConversationStatus.OPEN.value, sender)
         else:
             conversation.agent_last_read_at = _utcnow()
 
@@ -651,7 +663,7 @@ def reopen_conversation(db: Session, conversation: Conversation, actor: User) ->
     if conversation.status not in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
         raise HTTPException(status_code=409, detail="Conversation is not resolved or closed")
 
-    return transition_status(db, conversation, ConversationStatus.PENDING.value, actor)
+    return transition_status(db, conversation, ConversationStatus.OPEN.value, actor)
 
 
 def ensure_can_view(user: User, conversation: Conversation) -> None:
@@ -659,8 +671,10 @@ def ensure_can_view(user: User, conversation: Conversation) -> None:
     if user.role == "customer" and conversation.customer_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this conversation")
     elif user.role == "agent":
-        # Agents can view if assigned, if in inbox/pending queues, or if merged
+        # Agents can view if assigned, if in inbox/pending/open queues, or if merged
         if conversation.assigned_agent_id != user.id and conversation.status not in (
+            ConversationStatus.OPEN,
+            ConversationStatus.ASSIGNED,
             ConversationStatus.AI_HANDLING,
             ConversationStatus.PENDING,
             ConversationStatus.MERGED,
@@ -672,7 +686,7 @@ def ensure_can_modify(user: User, conversation: Conversation) -> None:
     """Check if user can modify this conversation (send messages, etc.)."""
     ensure_can_view(user, conversation)
     if user.role == "agent" and conversation.assigned_agent_id != user.id:
-        if conversation.status not in (ConversationStatus.AI_HANDLING, ConversationStatus.PENDING):
+        if conversation.status not in (ConversationStatus.OPEN, ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING, ConversationStatus.PENDING):
             raise HTTPException(status_code=403, detail="Not assigned to this conversation")
 
 
@@ -812,7 +826,7 @@ async def _execute_ai_turn_for_conversation(db: Session, conversation_id: int, c
                     db.commit()
 
             if result.should_escalate:
-                conversation.status = ConversationStatus.PENDING
+                conversation.status = ConversationStatus.OPEN
                 record_system_event(
                     db,
                     conversation,

@@ -57,52 +57,91 @@ def db_session():
     session.close()
 
 
-def test_dashboard_5_metrics_partition(db_session):
-    """Verify that the 5 metrics strictly partition unresolved conversations: AI + Human + Pending + Open == All Unresolved."""
+from app.models.message import Message, MessageSenderType, MessageType
+from app.services.conversation_service import (
+    get_unread_customer_message_condition,
+    mark_conversation_read_for_user,
+    reopen_conversation,
+    resolve_conversation,
+    transition_status,
+)
+
+
+def test_open_and_pending_metrics_and_lifecycle(db_session):
+    """Verify that Open and Pending adhere strictly to the updated status definitions."""
+    from sqlalchemy import exists, and_
+
     base_unmerged = Conversation.merged_into_id.is_(None)
     resolved_statuses = [ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]
-    pending_statuses = [ConversationStatus.PENDING, ConversationStatus.ON_HOLD, ConversationStatus.WAITING_ON_CUSTOMER]
+    unresolved_cond = and_(base_unmerged, Conversation.status.notin_(resolved_statuses))
 
-    all_unresolved = db_session.query(Conversation).filter(
-        base_unmerged,
-        Conversation.status.notin_(resolved_statuses)
-    ).count()
+    admin = db_session.query(User).filter(User.role == "admin").first()
+    customer = db_session.query(User).filter(User.role == "customer").first()
+    now = datetime.now(timezone.utc)
 
-    ai_handling = db_session.query(Conversation).filter(
-        base_unmerged,
-        Conversation.status.notin_(resolved_statuses),
-        Conversation.assigned_agent_id.is_(None),
-        Conversation.status == ConversationStatus.AI_HANDLING,
-    ).count()
+    # Initially conv4 is unresolved with no messages. Let's add an unread customer message to conv4
+    msg1 = Message(
+        conversation_id=4,
+        sender_id=customer.id,
+        sender_type=MessageSenderType.CUSTOMER,
+        content="Need help please",
+        is_internal=False,
+        created_at=now,
+    )
+    db_session.add(msg1)
+    db_session.commit()
 
-    pending = db_session.query(Conversation).filter(
-        base_unmerged,
-        Conversation.status.notin_(resolved_statuses),
-        Conversation.status.in_(pending_statuses),
-    ).count()
+    has_unread = exists().where(get_unread_customer_message_condition())
 
-    human_handling = db_session.query(Conversation).filter(
-        base_unmerged,
-        Conversation.status.notin_(resolved_statuses),
-        Conversation.assigned_agent_id.isnot(None),
-        Conversation.status.notin_(pending_statuses),
-    ).count()
+    # 1. Open count: must count active unresolved conversations with unread customer messages
+    open_count = db_session.query(Conversation).filter(unresolved_cond, has_unread).count()
+    assert open_count == 1
 
-    open_convs = db_session.query(Conversation).filter(
-        base_unmerged,
-        Conversation.status.notin_(resolved_statuses),
-        Conversation.assigned_agent_id.is_(None),
-        Conversation.status.notin_([ConversationStatus.AI_HANDLING] + pending_statuses),
-    ).count()
+    # 2. Once the relevant message is read, remove the conversation from the Open count
+    conv4 = db_session.query(Conversation).filter(Conversation.id == 4).first()
+    mark_conversation_read_for_user(db_session, conv4.id, admin)
+    open_count_after_read = db_session.query(Conversation).filter(unresolved_cond, has_unread).count()
+    assert open_count_after_read == 0
 
-    # Exact counts from our fixture
-    assert all_unresolved == 4
-    assert ai_handling == 1  # conv1
-    assert human_handling == 1  # conv2
-    assert pending == 1  # conv3
-    assert open_convs == 1  # conv4
-    # Zero overlap and zero gap invariant
-    assert ai_handling + human_handling + pending + open_convs == all_unresolved
+    # 3. New customer message arrives -> immediately Open count increments
+    now_later = now + timedelta(minutes=5)
+    msg2 = Message(
+        conversation_id=4,
+        sender_id=customer.id,
+        sender_type=MessageSenderType.CUSTOMER,
+        content="Any updates?",
+        is_internal=False,
+        created_at=now_later,
+    )
+    db_session.add(msg2)
+    db_session.commit()
+    open_count_new_msg = db_session.query(Conversation).filter(unresolved_cond, has_unread).count()
+    assert open_count_new_msg == 1
+
+    # 4. Resolved and closed conversations must never count as Open
+    resolve_conversation(db_session, conv4, admin)
+    db_session.commit()
+    open_count_resolved = db_session.query(Conversation).filter(unresolved_cond, has_unread).count()
+    assert open_count_resolved == 0
+
+    # 5. Reopened conversation immediately returns to active/unresolved
+    reopen_conversation(db_session, conv4, admin)
+    db_session.commit()
+    assert conv4.status == ConversationStatus.OPEN
+    open_count_reopened = db_session.query(Conversation).filter(unresolved_cond, has_unread).count()
+    assert open_count_reopened == 1
+
+    # 6. Pending is a status manually set by an agent and remains until changed
+    conv3 = db_session.query(Conversation).filter(Conversation.id == 3).first()
+    assert conv3.status == ConversationStatus.PENDING
+    pending_count = db_session.query(Conversation).filter(unresolved_cond, Conversation.status == ConversationStatus.PENDING).count()
+    assert pending_count == 1
+
+    # Changing status away from Pending
+    transition_status(db_session, conv3, ConversationStatus.OPEN.value, admin)
+    db_session.commit()
+    pending_count_after = db_session.query(Conversation).filter(unresolved_cond, Conversation.status == ConversationStatus.PENDING).count()
+    assert pending_count_after == 0
 
 
 def test_reports_agent_performance_and_knowledge(db_session):

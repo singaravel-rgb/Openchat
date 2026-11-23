@@ -87,7 +87,7 @@ def assign_conversation_to_agent(db: Session, conversation: Conversation) -> boo
     available_agents = get_available_agents(db)
 
     if not available_agents:
-        conversation.status = ConversationStatus.PENDING
+        conversation.status = ConversationStatus.OPEN
         conversation.assigned_agent_id = None
         notify_unassigned_pending(db, conversation)
         return False
@@ -135,10 +135,14 @@ def assign_conversation_to_agent(db: Session, conversation: Conversation) -> boo
 
 
 def process_pending_queue(db: Session) -> int:
-    """Process pending conversations FIFO when agent capacity becomes available."""
+    """Process unassigned open & pending conversations FIFO when agent capacity becomes available."""
     pending_conversations = (
         db.query(Conversation)
-        .filter(Conversation.status == ConversationStatus.PENDING)
+        .filter(
+            Conversation.status.in_([ConversationStatus.PENDING, ConversationStatus.OPEN]),
+            Conversation.assigned_agent_id.is_(None),
+            Conversation.merged_into_id.is_(None),
+        )
         .order_by(Conversation.created_at.asc(), Conversation.id.asc())
         .all()
     )

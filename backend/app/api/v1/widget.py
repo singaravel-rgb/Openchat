@@ -630,7 +630,7 @@ async def request_human(
         return {"status": conversation.status, "message": "A human agent is already assisting you."}
 
     prev = conversation.status
-    conversation.status = ConversationStatus.PENDING
+    conversation.status = ConversationStatus.OPEN
     record_system_event(db, conversation, "Customer requested human assistance", actor_id=user.id)
     append_assignment_history(db, conversation, user.id, "handoff_requested")
     db.flush()
@@ -641,7 +641,7 @@ async def request_human(
     if conversation.assigned_agent_id and conversation.status == ConversationStatus.ASSIGNED:
         # assignment engine handled it (agent available)
         return {"status": conversation.status, "message": "Connecting you with a human agent now."}
-    return {"status": ConversationStatus.PENDING, "message": "Your conversation is in the queue. A human agent will assist you shortly."}
+    return {"status": ConversationStatus.OPEN, "message": "Your conversation is in the queue. A human agent will assist you shortly."}
 
 
 @router.get("/embed.js")

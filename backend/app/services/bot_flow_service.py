@@ -597,7 +597,7 @@ def match_and_execute_bot_flow_step(
     if step.get("step_type") in ("handoff", "escalate"):
         from app.services.assignment_service import assign_conversation_to_agent
         from app.services.conversation_service import record_system_event
-        conversation.status = ConversationStatus.PENDING
+        conversation.status = ConversationStatus.OPEN
         record_system_event(db, conversation, f"Bot flow step '{step['step_key']}' triggered escalation to human support")
         assign_conversation_to_agent(db, conversation)
 

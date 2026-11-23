@@ -296,7 +296,7 @@ def assign_conversation(
             if conversation.assigned_agent_id:
                 release_agent_capacity(db, conversation.assigned_agent_id)
             conversation.assigned_agent_id = None
-            conversation.status = ConversationStatus.PENDING
+            conversation.status = ConversationStatus.OPEN
             conversation.updated_at = _utcnow()
             record_system_event(db, conversation, f"Unassigned by {current_user.full_name}", actor_id=current_user.id)
             db.commit()
@@ -315,7 +315,7 @@ def assign_conversation(
             if conversation.assigned_agent_id:
                 release_agent_capacity(db, conversation.assigned_agent_id)
             conversation.assigned_agent_id = None
-            conversation.status = ConversationStatus.PENDING
+            conversation.status = ConversationStatus.OPEN
             conversation.updated_at = _utcnow()
             record_system_event(db, conversation, f"Unassigned by {current_user.full_name}", actor_id=current_user.id)
         else:

@@ -192,6 +192,7 @@ export default function AdminDashboardPage() {
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">All Unresolved</p>
                   <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">{allUnresolved}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Total active & unresolved</p>
                 </CardContent>
               </Card>
             </Link>
@@ -201,6 +202,7 @@ export default function AdminDashboardPage() {
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">AI Handling</p>
                   <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{aiHandling}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Handled by AI</p>
                 </CardContent>
               </Card>
             </Link>
@@ -210,6 +212,7 @@ export default function AdminDashboardPage() {
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Human Handling</p>
                   <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{humanHandled}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Assigned to agents</p>
                 </CardContent>
               </Card>
             </Link>
@@ -219,6 +222,7 @@ export default function AdminDashboardPage() {
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pending</p>
                   <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{pendingCount}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Status set by agent</p>
                 </CardContent>
               </Card>
             </Link>
@@ -228,6 +232,7 @@ export default function AdminDashboardPage() {
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Open</p>
                   <p className="text-2xl font-bold text-sky-600 dark:text-sky-400 mt-1">{openCount}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Unread & awaiting response</p>
                 </CardContent>
               </Card>
             </Link>

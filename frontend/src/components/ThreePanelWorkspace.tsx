@@ -584,14 +584,14 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       setSelectedConversation(prev => prev ? {
         ...prev,
         status: targetStatus as any,
-        assigned_agent_id: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : prev.assigned_agent_id,
-        assigned_agent_name: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : prev.assigned_agent_name,
+        assigned_agent_id: targetStatus === 'on_hold' ? null : prev.assigned_agent_id,
+        assigned_agent_name: targetStatus === 'on_hold' ? null : prev.assigned_agent_name,
       } : null);
       setConversations(prev => prev.map(c => c.id === selectedConversation.id ? {
         ...c,
         status: targetStatus as any,
-        assigned_agent_id: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : c.assigned_agent_id,
-        assigned_agent_name: targetStatus === 'on_hold' || targetStatus === 'pending' ? null : c.assigned_agent_name,
+        assigned_agent_id: targetStatus === 'on_hold' ? null : c.assigned_agent_id,
+        assigned_agent_name: targetStatus === 'on_hold' ? null : c.assigned_agent_name,
       } : c));
       await loadConversation(selectedConversation.id);
     } catch (err) {
@@ -1186,7 +1186,11 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         if (adminFilters.status === 'resolved') {
           if (c.status !== 'resolved' && c.status !== 'closed') return false;
         } else if (adminFilters.status === 'open') {
-          if (c.status !== 'open' && c.status !== 'assigned') return false;
+          // Open means an active, unresolved conversation with an unread customer message requiring attention/response
+          if (c.status === 'resolved' || c.status === 'closed') return false;
+          if (!c.unread_count || c.unread_count <= 0) return false;
+        } else if (adminFilters.status === 'pending') {
+          if (c.status !== 'pending') return false;
         } else if (adminFilters.status !== 'all') {
           if (c.status !== adminFilters.status) return false;
         }
@@ -1745,8 +1749,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                           Change Status
                         </div>
                         {[
-                          { key: 'open', label: 'Open', desc: 'Actively being handled', dot: 'bg-blue-500' },
-                          { key: 'pending', label: 'Pending', desc: 'Waiting for assignment', dot: 'bg-amber-500' },
+                          { key: 'open', label: 'Open', desc: 'Active & awaiting attention', dot: 'bg-sky-500' },
+                          { key: 'pending', label: 'Pending', desc: 'Status set by agent', dot: 'bg-amber-500' },
                           { key: 'waiting_on_customer', label: 'Waiting on Customer', desc: 'Waiting for customer reply', dot: 'bg-purple-500' },
                           { key: 'on_hold', label: 'On Hold', desc: 'Paused & unassigned', dot: 'bg-slate-500' },
                           { key: 'resolved', label: 'Resolved', desc: 'Issue marked resolved', dot: 'bg-emerald-500' },

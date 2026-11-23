@@ -186,9 +186,9 @@ def check_response_deadlines_and_escalate(db: Session) -> dict[str, Any]:
                     )
                     reassignments += 1
                 else:
-                    # No other agent available; move to PENDING queue and alert supervisors
+                    # No other agent available; move to unassigned OPEN queue and alert supervisors
                     old_agent = conv.assigned_agent
-                    conv.status = ConversationStatus.PENDING
+                    conv.status = ConversationStatus.OPEN
                     conv.assigned_agent_id = None
 
                     history.append({

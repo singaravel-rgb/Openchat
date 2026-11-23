@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, exists
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_roles
@@ -58,7 +58,6 @@ def get_admin_stats(
 ):
     base_unmerged = Conversation.merged_into_id.is_(None)
     resolved_statuses = [ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]
-    pending_statuses = [ConversationStatus.PENDING, ConversationStatus.ON_HOLD, ConversationStatus.WAITING_ON_CUSTOMER]
 
     total_conversations = db.query(Conversation).filter(base_unmerged).count()
 
@@ -70,7 +69,7 @@ def get_admin_stats(
     all_unresolved = db.query(Conversation).filter(unresolved_cond).count()
     total_unresolved = all_unresolved
 
-    # Partition 1: AI Handling (unresolved, unassigned, status == ai_handling)
+    # 1. AI Handling: unresolved, unassigned, status == ai_handling
     ai_handling_conversations = (
         db.query(Conversation)
         .filter(
@@ -81,35 +80,37 @@ def get_admin_stats(
         .count()
     )
 
-    # Partition 2: Pending (unresolved, status kept by agent: pending, on_hold, waiting_on_customer)
-    pending_conversations = (
-        db.query(Conversation)
-        .filter(
-            unresolved_cond,
-            Conversation.status.in_(pending_statuses),
-        )
-        .count()
-    )
-
-    # Partition 3: Human Handling (unresolved, assigned to agent, not in pending statuses)
+    # 2. Human Handling: unresolved, assigned to human agent, not in pending status
     human_handling_conversations = (
         db.query(Conversation)
         .filter(
             unresolved_cond,
             Conversation.assigned_agent_id.isnot(None),
-            Conversation.status.notin_(pending_statuses),
+            Conversation.status != ConversationStatus.PENDING,
         )
         .count()
     )
     human_handled_conversations = human_handling_conversations
 
-    # Partition 4: Open (unresolved, unassigned, not ai_handling and not pending)
+    # 3. Pending: status manually set by agent
+    pending_conversations = (
+        db.query(Conversation)
+        .filter(
+            unresolved_cond,
+            Conversation.status == ConversationStatus.PENDING,
+        )
+        .count()
+    )
+
+    # 4. Open: active, unresolved conversation with an unread customer message requiring attention/response
+    from app.services.conversation_service import get_unread_customer_message_condition
+    has_unread_customer_msg = exists().where(get_unread_customer_message_condition())
+
     open_conversations = (
         db.query(Conversation)
         .filter(
             unresolved_cond,
-            Conversation.assigned_agent_id.is_(None),
-            Conversation.status.notin_([ConversationStatus.AI_HANDLING] + pending_statuses),
+            has_unread_customer_msg,
         )
         .count()
     )
