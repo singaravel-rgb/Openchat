@@ -207,9 +207,11 @@ export interface AgentWorkload {
 export interface AdminStats {
   conversations: {
     total: number;
+    all_unresolved?: number;
     total_unresolved?: number;
     unresolved?: number;
     ai_handling: number;
+    human_handling?: number;
     ai_resolved?: number;
     human_handled?: number;
     escalation_rate?: number;

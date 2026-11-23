@@ -58,6 +58,7 @@ def get_admin_stats(
 ):
     base_unmerged = Conversation.merged_into_id.is_(None)
     resolved_statuses = [ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]
+    pending_statuses = [ConversationStatus.PENDING, ConversationStatus.ON_HOLD, ConversationStatus.WAITING_ON_CUSTOMER]
 
     total_conversations = db.query(Conversation).filter(base_unmerged).count()
 
@@ -66,7 +67,8 @@ def get_admin_stats(
         base_unmerged,
         Conversation.status.notin_(resolved_statuses),
     )
-    total_unresolved = db.query(Conversation).filter(unresolved_cond).count()
+    all_unresolved = db.query(Conversation).filter(unresolved_cond).count()
+    total_unresolved = all_unresolved
 
     # Partition 1: AI Handling (unresolved, unassigned, status == ai_handling)
     ai_handling_conversations = (
@@ -79,28 +81,40 @@ def get_admin_stats(
         .count()
     )
 
-    # Partition 2: Human Handling (unresolved, assigned_agent_id is not null)
-    human_handled_conversations = (
-        db.query(Conversation)
-        .filter(
-            unresolved_cond,
-            Conversation.assigned_agent_id.isnot(None),
-        )
-        .count()
-    )
-
-    # Partition 3: Pending (unresolved, unassigned, status != ai_handling)
+    # Partition 2: Pending (unresolved, status kept by agent: pending, on_hold, waiting_on_customer)
     pending_conversations = (
         db.query(Conversation)
         .filter(
             unresolved_cond,
-            Conversation.assigned_agent_id.is_(None),
-            Conversation.status != ConversationStatus.AI_HANDLING,
+            Conversation.status.in_(pending_statuses),
         )
         .count()
     )
 
-    # Partition 4: Resolved (unmerged, status in (resolved, closed))
+    # Partition 3: Human Handling (unresolved, assigned to agent, not in pending statuses)
+    human_handling_conversations = (
+        db.query(Conversation)
+        .filter(
+            unresolved_cond,
+            Conversation.assigned_agent_id.isnot(None),
+            Conversation.status.notin_(pending_statuses),
+        )
+        .count()
+    )
+    human_handled_conversations = human_handling_conversations
+
+    # Partition 4: Open (unresolved, unassigned, not ai_handling and not pending)
+    open_conversations = (
+        db.query(Conversation)
+        .filter(
+            unresolved_cond,
+            Conversation.assigned_agent_id.is_(None),
+            Conversation.status.notin_([ConversationStatus.AI_HANDLING] + pending_statuses),
+        )
+        .count()
+    )
+
+    # Partition 5: Resolved (unmerged, status in (resolved, closed))
     resolved_conversations = (
         db.query(Conversation)
         .filter(
@@ -181,18 +195,20 @@ def get_admin_stats(
     return {
         "conversations": {
             "total": total_conversations,
-            "total_unresolved": total_unresolved,
-            "unresolved": total_unresolved,
+            "all_unresolved": all_unresolved,
+            "total_unresolved": all_unresolved,
+            "unresolved": all_unresolved,
             "ai_handling": ai_handling_conversations,
+            "human_handling": human_handling_conversations,
+            "human_handled": human_handling_conversations,
+            "pending": pending_conversations,
+            "open": open_conversations,
             "ai_resolved": ai_resolved_conversations,
-            "human_handled": human_handled_conversations,
             "escalation_rate": escalation_rate,
             "missed_deadlines": missed_deadlines,
-            "unassigned": unassigned_conversations,
-            "unanswered": unanswered_conversations,
-            "pending": pending_conversations,
-            "assigned": assigned_conversations,
-            "open": assigned_conversations,
+            "unassigned": ai_handling_conversations + open_conversations,
+            "unanswered": pending_conversations,
+            "assigned": human_handling_conversations,
             "on_hold": on_hold_conversations,
             "waiting_on_customer": waiting_on_customer_conversations,
             "resolved": resolved_conversations,

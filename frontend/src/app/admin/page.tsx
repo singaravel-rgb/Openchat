@@ -118,8 +118,11 @@ export default function AdminDashboardPage() {
   const busyAgents = stats?.agents.busy || 0;
   const offlineAgents = Math.max(0, totalAgents - availableAgents - busyAgents);
 
-  const humanHandled = stats?.conversations.human_handled ?? ((stats?.conversations.assigned || 0) + (stats?.conversations.open || 0));
-  const resolvedTotal = stats?.conversations.resolved ?? ((stats?.conversations.ai_resolved || 0) + (stats?.conversations.today || 0));
+  const humanHandled = stats?.conversations.human_handling ?? stats?.conversations.human_handled ?? (stats?.conversations.assigned || 0);
+  const allUnresolved = stats?.conversations.all_unresolved ?? stats?.conversations.total_unresolved ?? stats?.conversations.unresolved ?? 0;
+  const aiHandling = stats?.conversations.ai_handling || 0;
+  const pendingCount = stats?.conversations.pending || 0;
+  const openCount = stats?.conversations.open || 0;
   const unassignedTotal = stats?.conversations.unassigned ?? stats?.conversations.pending ?? 0;
   const unansweredTotal = stats?.conversations.unanswered ?? stats?.conversations.waiting_on_customer ?? 0;
 
@@ -183,12 +186,21 @@ export default function AdminDashboardPage() {
               Open Workspace →
             </Link>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <Link href="/admin/conversations" className="block group">
+              <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
+                <CardContent className="p-5">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">All Unresolved</p>
+                  <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">{allUnresolved}</p>
+                </CardContent>
+              </Card>
+            </Link>
+
             <Link href="/admin/conversations?handling=ai" className="block group">
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">AI Handling</p>
-                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{stats?.conversations.ai_handling || 0}</p>
+                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{aiHandling}</p>
                 </CardContent>
               </Card>
             </Link>
@@ -206,16 +218,16 @@ export default function AdminDashboardPage() {
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
                   <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pending</p>
-                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{stats?.conversations.pending || 0}</p>
+                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{pendingCount}</p>
                 </CardContent>
               </Card>
             </Link>
 
-            <Link href="/admin/conversations?status=resolved" className="block group">
+            <Link href="/admin/conversations?status=open" className="block group">
               <Card className="hover:shadow-md transition-shadow cursor-pointer h-full border-slate-200 dark:border-slate-800">
                 <CardContent className="p-5">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Resolved</p>
-                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{resolvedTotal}</p>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Open</p>
+                  <p className="text-2xl font-bold text-sky-600 dark:text-sky-400 mt-1">{openCount}</p>
                 </CardContent>
               </Card>
             </Link>

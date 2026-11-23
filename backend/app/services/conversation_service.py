@@ -154,18 +154,24 @@ def list_conversations_query(
     # Always exclude merged child conversations from standard views
     query = query.filter(Conversation.merged_into_id.is_(None))
 
+    resolved_statuses = [ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]
+    pending_statuses = [ConversationStatus.PENDING, ConversationStatus.ON_HOLD, ConversationStatus.WAITING_ON_CUSTOMER]
+
     if status_filter:
-        s = status_filter.lower()
+        s = status_filter.lower().strip()
         if s == "open":
             query = query.filter(
-                Conversation.status.in_([ConversationStatus.OPEN, ConversationStatus.ASSIGNED]),
-                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+                Conversation.assigned_agent_id.is_(None),
+                Conversation.status.notin_([ConversationStatus.AI_HANDLING] + pending_statuses + resolved_statuses),
             )
         elif s == "pending":
             query = query.filter(
-                Conversation.assigned_agent_id.is_(None),
-                Conversation.status != ConversationStatus.AI_HANDLING,
-                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+                Conversation.status.in_(pending_statuses),
+                Conversation.status.notin_(resolved_statuses),
+            )
+        elif s == "all_unresolved":
+            query = query.filter(
+                Conversation.status.notin_(resolved_statuses),
             )
         elif s == "resolved":
             query = query.filter(Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED]))
@@ -176,11 +182,7 @@ def list_conversations_query(
     elif not q and queue not in ("resolved",):
         # Default view: show unresolved/active conversations only (hide resolved, closed & merged)
         query = query.filter(
-            Conversation.status.notin_([
-                ConversationStatus.RESOLVED,
-                ConversationStatus.CLOSED,
-                ConversationStatus.MERGED,
-            ])
+            Conversation.status.notin_(resolved_statuses)
         )
 
     if handling:
@@ -188,19 +190,18 @@ def list_conversations_query(
         if h == "human":
             query = query.filter(
                 Conversation.assigned_agent_id.isnot(None),
-                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+                Conversation.status.notin_(pending_statuses + resolved_statuses),
             )
         elif h == "ai":
             query = query.filter(
                 Conversation.assigned_agent_id.is_(None),
                 Conversation.status == ConversationStatus.AI_HANDLING,
-                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+                Conversation.status.notin_(resolved_statuses),
             )
         elif h == "pending":
             query = query.filter(
-                Conversation.assigned_agent_id.is_(None),
-                Conversation.status != ConversationStatus.AI_HANDLING,
-                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+                Conversation.status.in_(pending_statuses),
+                Conversation.status.notin_(resolved_statuses),
             )
 
     if filter_type:

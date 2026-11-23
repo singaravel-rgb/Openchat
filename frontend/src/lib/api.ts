@@ -99,7 +99,27 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
     return {} as T;
   }
 
-  return response.json();
+  const contentType = response.headers.get('content-type') || '';
+  if (
+    contentType.includes('text/csv') ||
+    contentType.includes('application/octet-stream') ||
+    contentType.includes('application/pdf') ||
+    contentType.includes('application/zip') ||
+    contentType.includes('application/vnd.openxmlformats-officedocument')
+  ) {
+    return (await response.blob()) as unknown as T;
+  }
+
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return new Blob([text], { type: contentType || 'text/plain' }) as unknown as T;
+  }
 }
 
 export const authApi = {
@@ -675,13 +695,23 @@ export const adminApi = {
     return fetchApi<AgentPerformance[]>(`/admin/reports/agents?${params}`);
   },
 
-  getTimeSeries: (filters?: { metric?: string; date_from?: string; date_to?: string; channel?: string; interval?: string }) => {
+  getTimeSeries: async (filters?: { metric?: string; date_from?: string; date_to?: string; channel?: string; interval?: string }): Promise<TimeSeriesPoint[]> => {
     const params = new URLSearchParams();
     if (filters?.metric) params.append('metric', filters.metric);
     if (filters?.date_from) params.append('start_date', filters.date_from);
     if (filters?.date_to) params.append('end_date', filters.date_to);
     if (filters?.interval) params.append('interval', filters.interval);
-    return fetchApi<TimeSeriesPoint[]>(`/admin/reports/time-series?${params}`);
+    const data = await fetchApi<any>(`/admin/reports/time-series?${params}`);
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.series)) {
+      return data.series.map((item: any) => ({
+        date: item.date,
+        created: item.created ?? item.value ?? 0,
+        resolved: item.resolved ?? 0,
+        avg_resolution_hours: item.avg_resolution_hours ?? null,
+      }));
+    }
+    return [];
   },
 
   getKnowledgeMetrics: (filters?: ReportFilters) => {

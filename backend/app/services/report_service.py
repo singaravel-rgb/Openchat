@@ -101,15 +101,15 @@ def get_agent_performance(
     for agent in agents:
         query = db.query(Conversation).filter(
             Conversation.assigned_agent_id == agent.id,
-            Conversation.status.in_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED])
         )
         
         if start_date:
-            query = query.filter(Conversation.resolved_at >= start_date)
+            query = query.filter(Conversation.created_at >= start_date)
         if end_date:
-            query = query.filter(Conversation.resolved_at <= end_date)
+            query = query.filter(Conversation.created_at <= end_date)
         
-        conversations = query.all()
+        all_agent_convs = query.all()
+        resolved_convs = [c for c in all_agent_convs if c.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED)]
         
         response_times = []
         resolution_times = []
@@ -118,7 +118,7 @@ def get_agent_performance(
         sla_resolution_met = 0
         sla_resolution_total = 0
         
-        for conv in conversations:
+        for conv in all_agent_convs:
             sla = get_sla_status(conv)
             
             if conv.first_response_at and conv.created_at:
@@ -144,18 +144,34 @@ def get_agent_performance(
         # Current active conversations
         active_count = db.query(Conversation).filter(
             Conversation.assigned_agent_id == agent.id,
-            Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),
+            Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN, ConversationStatus.AI_HANDLING]),
         ).count()
         
+        assigned_cnt = len(all_agent_convs)
+        resolved_cnt = len(resolved_convs)
+        avg_resp_min = round(sum(response_times) / len(response_times), 1) if response_times else None
+        avg_res_min = round(sum(resolution_times) / len(resolution_times), 1) if resolution_times else None
+        avg_res_hr = round(avg_res_min / 60, 1) if avg_res_min else None
+
         results.append({
             "agent_id": agent.id,
             "agent_name": agent.full_name,
-            "conversations_handled": len(conversations),
-            "conversations_resolved": len([c for c in conversations if c.status == ConversationStatus.RESOLVED]),
-            "avg_response_time_minutes": sum(response_times) / len(response_times) if response_times else None,
-            "avg_resolution_time_minutes": sum(resolution_times) / len(resolution_times) if resolution_times else None,
-            "sla_response_met_pct": (sla_response_met / sla_response_total * 100) if sla_response_total > 0 else None,
-            "sla_resolution_met_pct": (sla_resolution_met / sla_resolution_total * 100) if sla_resolution_total > 0 else None,
+            "agent_email": agent.email,
+            "conversations_handled": assigned_cnt,
+            "assigned_count": assigned_cnt,
+            "total_assigned": assigned_cnt,
+            "conversations_resolved": resolved_cnt,
+            "resolved_count": resolved_cnt,
+            "avg_response_time_minutes": avg_resp_min,
+            "first_response_avg_minutes": avg_resp_min,
+            "avg_resolution_time_minutes": avg_res_min,
+            "avg_resolution_hours": avg_res_hr,
+            "avg_resolution_time_hours": avg_res_hr,
+            "sla_response_met_pct": round((sla_response_met / sla_response_total * 100), 1) if sla_response_total > 0 else None,
+            "sla_resolution_met_pct": round((sla_resolution_met / sla_resolution_total * 100), 1) if sla_resolution_total > 0 else None,
+            "sla_response_breached_count": max(0, sla_response_total - sla_response_met),
+            "sla_resolution_breached_count": max(0, sla_resolution_total - sla_resolution_met),
+            "csat_avg": None,
             "current_active": active_count,
         })
     
@@ -164,7 +180,7 @@ def get_agent_performance(
 
 def get_time_series(
     db: Session,
-    metric: str,  # conversations_created, conversations_resolved, messages
+    metric: str = "conversations_created",  # conversations_created, conversations_resolved, messages
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     interval: str = "day",  # day, hour
@@ -185,40 +201,40 @@ def get_time_series(
         else:
             current += timedelta(hours=1)
     
-    # For simplicity, query by day
-    if metric == "conversations_created":
-        query = db.query(
-            func.date(Conversation.created_at).label("date"),
-            func.count(Conversation.id).label("count")
-        ).filter(
-            Conversation.created_at >= start_date,
-            Conversation.created_at <= end_date,
-        ).group_by(func.date(Conversation.created_at))
-    elif metric == "conversations_resolved":
-        query = db.query(
-            func.date(Conversation.resolved_at).label("date"),
-            func.count(Conversation.id).label("count")
-        ).filter(
-            Conversation.resolved_at >= start_date,
-            Conversation.resolved_at <= end_date,
-        ).group_by(func.date(Conversation.resolved_at))
-    elif metric == "messages":
-        query = db.query(
-            func.date(Message.created_at).label("date"),
-            func.count(Message.id).label("count")
-        ).filter(
-            Message.created_at >= start_date,
-            Message.created_at <= end_date,
-        ).group_by(func.date(Message.created_at))
-    else:
-        return []
-    
-    results = {str(r.date): r.count for r in query.all()}
+    # Query created counts
+    created_query = db.query(
+        func.date(Conversation.created_at).label("date"),
+        func.count(Conversation.id).label("count")
+    ).filter(
+        Conversation.created_at >= start_date,
+        Conversation.created_at <= end_date,
+    ).group_by(func.date(Conversation.created_at))
+    created_map = {str(r.date): r.count for r in created_query.all()}
+
+    # Query resolved counts
+    resolved_query = db.query(
+        func.date(Conversation.resolved_at).label("date"),
+        func.count(Conversation.id).label("count")
+    ).filter(
+        Conversation.resolved_at.isnot(None),
+        Conversation.resolved_at >= start_date,
+        Conversation.resolved_at <= end_date,
+    ).group_by(func.date(Conversation.resolved_at))
+    resolved_map = {str(r.date): r.count for r in resolved_query.all()}
     
     series = []
     for d in dates:
         date_str = d.strftime("%Y-%m-%d")
-        series.append({"date": date_str, "value": results.get(date_str, 0)})
+        c_count = created_map.get(date_str, 0)
+        r_count = resolved_map.get(date_str, 0)
+        val = c_count if metric == "conversations_created" else (r_count if metric == "conversations_resolved" else c_count)
+        series.append({
+            "date": date_str,
+            "value": val,
+            "created": c_count,
+            "resolved": r_count,
+            "avg_resolution_hours": None,
+        })
     
     return series
 
@@ -227,11 +243,14 @@ def get_knowledge_base_metrics(db: Session) -> dict:
     """Get knowledge base metrics."""
     total_articles = db.query(Article).count()
     published_articles = db.query(Article).filter(Article.status == "published").count()
+    draft_articles = db.query(Article).filter(Article.status == "draft").count()
+    archived_articles = db.query(Article).filter(Article.status == "archived").count()
     total_faqs = db.query(FAQ).count()
     published_faqs = db.query(FAQ).filter(FAQ.is_published == True).count()
     
-    total_views = db.query(func.coalesce(func.sum(Article.view_count), 0)).scalar() or 0
-    total_views += db.query(func.coalesce(func.sum(FAQ.view_count), 0)).scalar() or 0
+    article_views = db.query(func.coalesce(func.sum(Article.view_count), 0)).scalar() or 0
+    faq_views = db.query(func.coalesce(func.sum(FAQ.view_count), 0)).scalar() or 0
+    total_views = article_views + faq_views
     
     helpful_articles = db.query(func.coalesce(func.sum(Article.helpful_count), 0)).scalar() or 0
     not_helpful_articles = db.query(func.coalesce(func.sum(Article.not_helpful_count), 0)).scalar() or 0
@@ -240,6 +259,15 @@ def get_knowledge_base_metrics(db: Session) -> dict:
     
     total_helpful = helpful_articles + helpful_faqs
     total_feedback = total_helpful + not_helpful_articles + not_helpful_faqs
+
+    top_articles = [
+        {"id": a.id, "title": a.title, "views": a.view_count or 0}
+        for a in db.query(Article).order_by(Article.view_count.desc()).limit(5).all()
+    ]
+    top_faqs = [
+        {"id": f.id, "question": f.question, "views": f.view_count or 0}
+        for f in db.query(FAQ).order_by(FAQ.view_count.desc()).limit(5).all()
+    ]
     
     return {
         "total_articles": total_articles,
@@ -248,6 +276,20 @@ def get_knowledge_base_metrics(db: Session) -> dict:
         "published_faqs": published_faqs,
         "total_views": total_views,
         "helpful_rating_pct": (total_helpful / total_feedback * 100) if total_feedback > 0 else None,
+        "articles": {
+            "total": total_articles,
+            "published": published_articles,
+            "draft": draft_articles,
+            "archived": archived_articles,
+            "total_views": article_views,
+        },
+        "faqs": {
+            "total": total_faqs,
+            "published": published_faqs,
+            "total_views": faq_views,
+        },
+        "top_articles": top_articles,
+        "top_faqs": top_faqs,
     }
 
 
@@ -464,5 +506,30 @@ def export_report(
             return output.getvalue(), f"sla_{timestamp}.csv", "text/csv"
         else:
             return json.dumps(sla_data, indent=2), f"sla_{timestamp}.json", "application/json"
+
+    elif report_type in ("timeseries", "trends"):
+        series_data = get_time_series(db, "conversations_created", start_date, end_date)
+        headers = ["Date", "Created", "Resolved", "Avg Resolution (hrs)"]
+        rows = [
+            [
+                s["date"],
+                s.get("created", s.get("value", 0)),
+                s.get("resolved", 0),
+                s.get("avg_resolution_hours") or "",
+            ]
+            for s in series_data
+        ]
+        if norm_format == "xlsx":
+            content = generate_xlsx(headers, rows, sheet_name="Trends")
+            return content, f"trends_{timestamp}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif norm_format == "csv":
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(headers)
+            for row in rows:
+                writer.writerow(row)
+            return output.getvalue(), f"trends_{timestamp}.csv", "text/csv"
+        else:
+            return json.dumps(series_data, indent=2), f"trends_{timestamp}.json", "application/json"
 
     raise ValueError(f"Unknown report type: {report_type}")

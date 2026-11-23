@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_pytest.db")
 
+import app.models  # noqa: F401
 from app.db.session import engine, SessionLocal
 from app.db.base import Base
 Base.metadata.create_all(bind=engine)

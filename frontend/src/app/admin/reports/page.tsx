@@ -110,17 +110,24 @@ export default function AdminReportsPage() {
 
   const handleExport = async (reportType: 'conversations' | 'agents' | 'timeseries' | 'knowledge', exportFormat: 'csv' | 'json') => {
     try {
-      const blob = await adminApi.exportReport({
+      const res = await adminApi.exportReport({
         report_type: reportType,
         format: exportFormat,
         filters: buildFilters(),
       });
-      const url = window.URL.createObjectURL(blob);
+      const downloadBlob = res instanceof Blob
+        ? res
+        : new Blob([typeof res === 'string' ? res : JSON.stringify(res, null, 2)], {
+            type: exportFormat === 'csv' ? 'text/csv' : 'application/json',
+          });
+      const url = window.URL.createObjectURL(downloadBlob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `${reportType}-report-${format(new Date(), 'yyyy-MM-dd')}.${exportFormat}`;
+      document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
+      a.remove();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed');
     }
@@ -529,129 +536,147 @@ export default function AdminReportsPage() {
         </div>
       )}
 
-      {activeTab === 'knowledge' && knowledgeMetrics && (
+      {activeTab === 'knowledge' && (
         <div className="space-y-6">
-          {/* Key Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {!knowledgeMetrics ? (
             <Card>
-              <CardContent className="p-6">
-                <div className="text-sm text-slate-500 dark:text-slate-400">Total Articles</div>
-                <div className="text-3xl font-bold text-slate-900 dark:text-white">{knowledgeMetrics.articles.total}</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                  {knowledgeMetrics.articles.published} published
-                </div>
+              <CardContent className="p-12 text-center text-slate-500 dark:text-slate-400">
+                No knowledge base metrics available for this period.
               </CardContent>
             </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-sm text-slate-500 dark:text-slate-400">Total FAQs</div>
-                <div className="text-3xl font-bold text-slate-900 dark:text-white">{knowledgeMetrics.faqs.total}</div>
-                <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                  {knowledgeMetrics.faqs.published} published
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-sm text-slate-500 dark:text-slate-400">Article Views</div>
-                <div className="text-3xl font-bold text-slate-900 dark:text-white">{knowledgeMetrics.articles.total_views}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-sm text-slate-500 dark:text-slate-400">FAQ Views</div>
-                <div className="text-3xl font-bold text-slate-900 dark:text-white">{knowledgeMetrics.faqs.total_views}</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Top Articles & FAQs */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Top Articles by Views</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {knowledgeMetrics.top_articles.map((article, index) => (
-                    <div key={article.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400 w-6">
-                          {index + 1}.
-                        </span>
-                        <div className="font-medium text-slate-900 dark:text-white truncate max-w-[250px]">
-                          {article.title}
-                        </div>
-                      </div>
-                      <Badge variant="default">{article.views} views</Badge>
+          ) : (
+            <>
+              {/* Key Metrics */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">Total Articles</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">
+                      {knowledgeMetrics.articles?.total ?? (knowledgeMetrics as any).total_articles ?? 0}
                     </div>
-                  ))}
-                  {knowledgeMetrics.top_articles.length === 0 && (
-                    <div className="text-center py-8 text-slate-500 dark:text-slate-400">
-                      No article views yet
+                    <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                      {knowledgeMetrics.articles?.published ?? (knowledgeMetrics as any).published_articles ?? 0} published
                     </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Top FAQs by Views</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {knowledgeMetrics.top_faqs.map((faq, index) => (
-                    <div key={faq.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400 w-6">
-                          {index + 1}.
-                        </span>
-                        <div className="font-medium text-slate-900 dark:text-white truncate max-w-[250px]">
-                          {faq.question}
-                        </div>
-                      </div>
-                      <Badge variant="default">{faq.views} views</Badge>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">Total FAQs</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">
+                      {knowledgeMetrics.faqs?.total ?? (knowledgeMetrics as any).total_faqs ?? 0}
                     </div>
-                  ))}
-                  {knowledgeMetrics.top_faqs.length === 0 && (
-                    <div className="text-center py-8 text-slate-500 dark:text-slate-400">
-                      No FAQ views yet
+                    <div className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                      {knowledgeMetrics.faqs?.published ?? (knowledgeMetrics as any).published_faqs ?? 0} published
                     </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Article Status Breakdown */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Article Status Distribution</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {knowledgeMetrics.articles.published}
-                  </div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400">Published</div>
-                </div>
-                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                  <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                    {knowledgeMetrics.articles.draft}
-                  </div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400">Draft</div>
-                </div>
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                  <div className="text-2xl font-bold text-slate-600 dark:text-slate-400">
-                    {knowledgeMetrics.articles.archived}
-                  </div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400">Archived</div>
-                </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">Article Views</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">
+                      {knowledgeMetrics.articles?.total_views ?? (knowledgeMetrics as any).total_views ?? 0}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">FAQ Views</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">
+                      {knowledgeMetrics.faqs?.total_views ?? 0}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-            </CardContent>
-          </Card>
+
+              {/* Top Articles & FAQs */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Top Articles by Views</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {(knowledgeMetrics.top_articles || []).map((article, index) => (
+                        <div key={article.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-slate-500 dark:text-slate-400 w-6">
+                              {index + 1}.
+                            </span>
+                            <div className="font-medium text-slate-900 dark:text-white truncate max-w-[250px]">
+                              {article.title}
+                            </div>
+                          </div>
+                          <Badge variant="default">{article.views} views</Badge>
+                        </div>
+                      ))}
+                      {(!knowledgeMetrics.top_articles || knowledgeMetrics.top_articles.length === 0) && (
+                        <div className="text-center py-8 text-slate-500 dark:text-slate-400">
+                          No article views yet
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Top FAQs by Views</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {(knowledgeMetrics.top_faqs || []).map((faq, index) => (
+                        <div key={faq.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-slate-500 dark:text-slate-400 w-6">
+                              {index + 1}.
+                            </span>
+                            <div className="font-medium text-slate-900 dark:text-white truncate max-w-[250px]">
+                              {faq.question}
+                            </div>
+                          </div>
+                          <Badge variant="default">{faq.views} views</Badge>
+                        </div>
+                      ))}
+                      {(!knowledgeMetrics.top_faqs || knowledgeMetrics.top_faqs.length === 0) && (
+                        <div className="text-center py-8 text-slate-500 dark:text-slate-400">
+                          No FAQ views yet
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Article Status Breakdown */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Article Status Distribution</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                        {knowledgeMetrics.articles?.published ?? (knowledgeMetrics as any).published_articles ?? 0}
+                      </div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">Published</div>
+                    </div>
+                    <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                      <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                        {knowledgeMetrics.articles?.draft ?? 0}
+                      </div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">Draft</div>
+                    </div>
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                      <div className="text-2xl font-bold text-slate-600 dark:text-slate-400">
+                        {knowledgeMetrics.articles?.archived ?? 0}
+                      </div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">Archived</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       )}
     </div>

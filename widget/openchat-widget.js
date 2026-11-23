@@ -459,8 +459,34 @@
     }
   }
 
+  function getWidgetStatusBadge(status) {
+    var s = (status || 'open').toLowerCase();
+    var label = 'Open';
+    var style = 'background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;'; // Open: Sky/Cyan
+    if (s === 'resolved') {
+      label = 'Resolved';
+      style = 'background:#dcfce7;color:#166534;border:1px solid #bbf7d0;'; // Resolved: Green
+    } else if (s === 'pending' || s === 'waiting_on_customer' || s === 'on_hold') {
+      label = 'Pending';
+      style = 'background:#fef3c7;color:#92400e;border:1px solid #fde68a;'; // Pending: Amber/Orange
+    } else if (s === 'assigned' || s === 'human_handling') {
+      label = 'Assigned';
+      style = 'background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;'; // Assigned: Blue
+    } else if (s === 'ai_handling') {
+      label = 'AI Handling';
+      style = 'background:#f3e8ff;color:#6b21a8;border:1px solid #e9d5ff;'; // AI Handling: Purple
+    } else if (s === 'closed') {
+      label = 'Closed';
+      style = 'background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;'; // Closed: Slate/Gray
+    }
+    return '<span style="font-size:10px;padding:2px 8px;border-radius:9999px;font-weight:600;' + style + '">' + esc(label) + '</span>';
+  }
+
   async function startConversation(initialMessage) {
+    if (state.startingChat || state.loading) return;
+    state.startingChat = true;
     state.loading = true;
+    state.activeTab = 'chat';
     render();
     try {
       var body = { subject: 'Website chat' };
@@ -477,6 +503,7 @@
       logError('startConversation', e);
       setError(e.message || 'Failed to start conversation');
     } finally {
+      state.startingChat = false;
       state.loading = false;
       render();
     }
@@ -668,6 +695,16 @@
       if (state.minimized) {
         panel += '<div class="ocw-body"><div class="ocw-empty">Chat minimized. Click below or launcher to restore.</div></div></div>';
       } else {
+        var isChatActive = state.activeTab !== 'chats';
+        var isChatsActive = state.activeTab === 'chats';
+        panel += '<div class="ocw-nav-bar" style="display:flex;align-items:center;justify-content:space-between;background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:6px 12px;font-size:12px;">';
+        panel += '<div style="display:flex;gap:4px;">';
+        panel += '<button type="button" id="ocw-tab-chat" style="border:none;background:' + (isChatActive ? '#ffffff' : 'transparent') + ';color:' + (isChatActive ? esc(primary) : '#64748b') + ';font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;box-shadow:' + (isChatActive ? '0 1px 2px rgba(0,0,0,0.06)' : 'none') + ';">Chat</button>';
+        panel += '<button type="button" id="ocw-tab-chats" style="border:none;background:' + (isChatsActive ? '#ffffff' : 'transparent') + ';color:' + (isChatsActive ? esc(primary) : '#64748b') + ';font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;box-shadow:' + (isChatsActive ? '0 1px 2px rgba(0,0,0,0.06)' : 'none') + ';">My Chats' + (totalUnread > 0 ? '<span style="background:#25D366;color:#fff;font-size:9px;font-weight:700;border-radius:9999px;padding:1px 5px;line-height:1.2;">' + (totalUnread > 99 ? '99+' : totalUnread) + '</span>' : '') + '</button>';
+        panel += '</div>';
+        panel += '<button type="button" id="ocw-nav-new-chat-btn" style="background:' + esc(primary) + ';color:#ffffff;border:none;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:3px;"' + (state.startingChat ? ' disabled' : '') + '>+ New Chat</button>';
+        panel += '</div>';
+
         panel += '<div class="ocw-body">';
         if (state.error) panel += '<div class="ocw-error">' + esc(state.error) + '</div>';
         if (state.info) panel += '<div class="ocw-error" style="background:#ecfeff;color:#155e75;border-color:#a5f3fc">' + esc(state.info) + '</div>';
@@ -678,9 +715,8 @@
             panel += '<div class="ocw-list" style="display:flex;flex-direction:column;gap:8px;">';
             state.conversations.forEach(function(c){
               var isResolved = c.status === 'resolved' || c.status === 'closed';
-              var statusBg = isResolved ? '#dcfce7;color:#166534' : (c.status === 'open' ? '#dbeafe;color:#1e40af' : '#fef3c7;color:#92400e');
               var chatIdBadge = c.chat_id ? '<span style="font-family:monospace;font-size:10px;padding:2px 6px;border-radius:4px;background:#f1f5f9;color:#475569;font-weight:600;">' + esc(c.chat_id) + '</span>' : '';
-              var statusBadge = '<span style="font-size:10px;padding:2px 7px;border-radius:9999px;font-weight:600;background:' + statusBg + ';">' + esc(c.status) + '</span>';
+              var statusBadge = getWidgetStatusBadge(c.status);
               var hasUnread = (c.unread_count && c.unread_count > 0);
               var unreadBadge = hasUnread ? '<span style="background:#25D366;color:#fff;font-size:10px;font-weight:700;border-radius:9999px;padding:2px 6px;margin-left:6px;min-width:18px;text-align:center;">' + (c.unread_count > 99 ? '99+' : c.unread_count) + '</span>' : '';
               var cardBorder = hasUnread ? 'border:1.5px solid #86efac;background:#f0fdf4;' : 'background:#fff;border:1px solid #e2e8f0;';
@@ -737,6 +773,14 @@
             panel += '<div class="ocw-empty">No previous conversations.</div>';
           }
         } else {
+          var chatCode = state.detail.chat_id || ('CHT-' + state.detail.id);
+          panel += '<div class="ocw-chat-subheader" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:11px;">';
+          panel += '<div style="display:flex;align-items:center;gap:6px;">';
+          panel += '<span style="font-family:monospace;font-weight:700;color:#334155;background:#e2e8f0;padding:1px 5px;border-radius:4px;">#' + esc(chatCode) + '</span>';
+          panel += getWidgetStatusBadge(state.detail.status);
+          panel += '</div>';
+          panel += '<button type="button" id="ocw-detail-new-chat" style="background:#ffffff;border:1px solid #cbd5e1;color:#1e293b;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;"' + (state.startingChat ? ' disabled' : '') + '>+ New Chat</button>';
+          panel += '</div>';
           panel += '<div class="ocw-list" style="flex:1;overflow-y:auto">';
           if (state.detail.messages && state.detail.messages.length) {
             state.detail.messages.forEach(function (m) {
@@ -921,15 +965,18 @@
     if (tabChats) {
       tabChats.onclick = function(){ state.activeTab = 'chats'; loadConversations().then(render); };
     }
+    var triggerNewChat = function(){
+      state.activeTab = 'chat';
+      state.detail = null;
+      state.activeId = null;
+      startConversation();
+    };
     var newChatBtn = $('#ocw-new-chat-btn');
-    if (newChatBtn) {
-      newChatBtn.onclick = function(){
-        state.activeTab = 'chat';
-        state.detail = null;
-        state.activeId = null;
-        startConversation();
-      };
-    }
+    if (newChatBtn) newChatBtn.onclick = triggerNewChat;
+    var navNewChatBtn = $('#ocw-nav-new-chat-btn');
+    if (navNewChatBtn) navNewChatBtn.onclick = triggerNewChat;
+    var detailNewChatBtn = $('#ocw-detail-new-chat');
+    if (detailNewChatBtn) detailNewChatBtn.onclick = triggerNewChat;
     var attachBtn = $('#ocw-attach-btn');
     var fileInput = $('#ocw-file-input');
     if (attachBtn && fileInput) {

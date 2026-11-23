@@ -41,20 +41,20 @@ Badge.displayName = 'Badge';
 export function getStatusBadgeVariant(status: string): BadgeProps['variant'] {
   switch (status) {
     case 'open':
+      return 'info'; // Sky / Cyan
     case 'assigned':
-      return 'primary';
+    case 'human_handling':
+      return 'primary'; // Blue
     case 'pending':
-      return 'warning';
     case 'waiting_on_customer':
-      return 'ai';
     case 'on_hold':
-      return 'system';
+      return 'warning'; // Amber / Orange
     case 'resolved':
-      return 'success';
+      return 'success'; // Green
     case 'closed':
-      return 'default';
+      return 'default'; // Slate / Gray
     case 'ai_handling':
-      return 'info';
+      return 'ai'; // Purple
     default:
       return 'default';
   }

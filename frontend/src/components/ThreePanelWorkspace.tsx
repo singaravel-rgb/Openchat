@@ -56,12 +56,12 @@ const senderInfo = (message: Message) => {
 
 const getStatusBadgeVariant = (status: string) => {
   switch (status) {
-    case 'resolved': case 'closed': return 'success';
-    case 'open': case 'assigned': return 'primary';
-    case 'pending': return 'warning';
-    case 'waiting_on_customer': return 'ai';
-    case 'on_hold': return 'system';
-    case 'ai_handling': return 'info';
+    case 'resolved': return 'success'; // Green
+    case 'closed': return 'default'; // Slate / Gray
+    case 'open': return 'info'; // Sky / Cyan
+    case 'assigned': case 'human_handling': return 'primary'; // Blue
+    case 'pending': case 'waiting_on_customer': case 'on_hold': return 'warning'; // Amber / Orange
+    case 'ai_handling': return 'ai'; // Purple
     default: return 'default';
   }
 };
@@ -410,7 +410,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
           unread_count: detail.unread_count ?? existing?.unread_count ?? 0,
           merged_into_id: detail.merged_into_id ?? existing?.merged_into_id ?? null,
         };
-        setSelectedConversation(existing || fromDetail);
+        setSelectedConversation({ ...(existing || {}), ...fromDetail });
         if (!existing) {
           return [fromDetail, ...prev.filter((c) => c.id !== id)];
         }
@@ -989,10 +989,23 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
     if (!selectedConversation) return;
     try {
       const api = userRole === 'admin' ? adminApi : agentApi;
-      await api.resolveConversation(selectedConversation.id, resolveDetails || undefined);
+      const targetId = selectedConversation.id;
+      // Optimistic update
+      setSelectedConversation((prev) => prev ? {
+        ...prev,
+        status: 'resolved' as any,
+        resolved_at: new Date().toISOString(),
+      } : null);
+      setConversations((prev) => prev.map((c) => c.id === targetId ? {
+        ...c,
+        status: 'resolved' as any,
+        resolved_at: new Date().toISOString(),
+      } : c));
+
+      await api.resolveConversation(targetId, resolveDetails || undefined);
       setShowResolveModal(false);
       setResolveDetails('');
-      await loadConversation(selectedConversation.id);
+      await loadConversation(targetId);
       await loadConversations();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resolve conversation');
