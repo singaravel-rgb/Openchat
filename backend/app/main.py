@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -6,6 +7,8 @@ from app.core.config import settings
 from app.middleware.audit_log import AuditLogMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="OpenChat API",
@@ -103,8 +106,7 @@ async def startup_event():
     try:
         from app.db.base import Base
         from app.db.session import engine
-        import app.models.password_reset
-        import app.models.conversation
+        import app.models
         Base.metadata.create_all(bind=engine)
     except Exception as e:
         logger.warning(f"Error ensuring database tables: {e}")

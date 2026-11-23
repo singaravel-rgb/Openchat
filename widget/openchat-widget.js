@@ -1,4 +1,4 @@
-(function(){
+(function () {
   console.log('[OpenChat Widget] Script loaded.');
   if (window.__openchatWidgetLoaded) {
     console.log('[OpenChat Widget] Already loaded, skipping duplicate execution.');
@@ -6,13 +6,13 @@
   }
   window.__openchatWidgetLoaded = true;
 
-  var currentScript = document.currentScript || (function() {
+  var currentScript = document.currentScript || (function () {
     var scripts = document.getElementsByTagName('script');
     return scripts[scripts.length - 1];
   })();
   var backendBase = (window.OpenChatConfig && (window.OpenChatConfig.backendUrl || window.OpenChatConfig.apiUrl)) ||
-                    (currentScript && currentScript.getAttribute('data-backend-url')) ||
-                    (typeof window !== 'undefined' && window.location && window.location.origin ? window.location.origin : "http://localhost:8000");
+    (currentScript && currentScript.getAttribute('data-backend-url')) ||
+    (typeof window !== 'undefined' && window.location && window.location.origin ? window.location.origin : "http://localhost:8000");
   backendBase = backendBase.replace(/\/+$/, '');
   backendBase = backendBase.replace(/\/api\/v1(?:\/widget)?$/, '');
   var API_BASE = backendBase + "/api/v1/widget";
@@ -223,7 +223,7 @@
     console.log(msg);
     diagnostics.logs.push({ time: new Date().toISOString(), stage: stage, data: data });
     if (window.__onOpenChatDiagUpdate && typeof window.__onOpenChatDiagUpdate === 'function') {
-      try { window.__onOpenChatDiagUpdate(diagnostics); } catch(e){}
+      try { window.__onOpenChatDiagUpdate(diagnostics); } catch (e) { }
     }
   }
 
@@ -236,63 +236,63 @@
     diagnostics.lastError = { stage: stage, message: errMsg, stack: err ? err.stack : null };
     diagnostics.logs.push({ time: new Date().toISOString(), stage: 'ERROR:' + stage, error: errMsg });
     if (window.__onOpenChatDiagUpdate && typeof window.__onOpenChatDiagUpdate === 'function') {
-      try { window.__onOpenChatDiagUpdate(diagnostics); } catch(e){}
+      try { window.__onOpenChatDiagUpdate(diagnostics); } catch (e) { }
     }
   }
 
-  function $(sel, root){
+  function $(sel, root) {
     if (root) return root.querySelector(sel);
     if (shadowRoot) return shadowRoot.querySelector(sel);
     return document.querySelector(sel);
   }
-  function $$(sel, root){
+  function $$(sel, root) {
     if (root) return root.querySelectorAll(sel);
     if (shadowRoot) return shadowRoot.querySelectorAll(sel);
     return document.querySelectorAll(sel);
   }
 
-  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-  function fmtTime(iso){ try { var d = new Date(iso); return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); } catch(e){ return ''; } }
-  function nowId(){ return 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function fmtTime(iso) { try { var d = new Date(iso); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+  function nowId() { return 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
 
-  function saveSession(){
+  function saveSession() {
     try {
       if (state.sessionToken) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: state.sessionToken, expiresAt: state.expiresAt }));
       }
-    } catch(e){}
+    } catch (e) { }
   }
 
-  function loadSession(){
+  function loadSession() {
     try {
       var v = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
       if (v && v.token) {
         state.sessionToken = v.token;
         state.expiresAt = v.expiresAt;
       }
-    } catch(e){}
+    } catch (e) { }
   }
 
-  function clearSession(){
-    try { localStorage.removeItem(STORAGE_KEY); } catch(e){}
+  function clearSession() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { }
     state.sessionToken = null;
     state.expiresAt = null;
   }
 
-  function headers(json){
+  function headers(json) {
     var h = {};
     if (json) h['Content-Type'] = 'application/json';
     if (state.sessionToken) h['X-Widget-Session'] = state.sessionToken;
     return h;
   }
 
-  async function api(path, opts){
+  async function api(path, opts) {
     opts = opts || {};
     opts.headers = Object.assign({}, headers(opts.json), opts.headers || {});
     var res = await fetch(API_BASE + path, opts);
     var text = await res.text();
     var data = null;
-    try { data = text ? JSON.parse(text) : null; } catch(e){ data = { detail: text }; }
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = { detail: text }; }
     if (!res.ok) {
       var msg = (data && data.detail) || (res.status === 429 ? 'Too many requests. Please slow down.' : 'Request failed (' + res.status + ')');
       var err = new Error(msg);
@@ -303,15 +303,15 @@
     return data;
   }
 
-  function isHelpPage(cfg){
+  function isHelpPage(cfg) {
     if (!cfg || !cfg.hide_launcher_on_help_page) return false;
     try {
       var p = location.pathname || '';
       return p === '/help' || p.indexOf('/help/') === 0;
-    } catch(e){ return false; }
+    } catch (e) { return false; }
   }
 
-  function getHostRoot(){
+  function getHostRoot() {
     if (rootHostEl && shadowRoot) return rootHostEl;
     rootHostEl = document.getElementById('openchat-widget-root');
     if (!rootHostEl) {
@@ -332,7 +332,7 @@
     return rootHostEl;
   }
 
-  function injectStyles(primary){
+  function injectStyles(primary) {
     if (!shadowRoot) return;
     var existing = shadowRoot.querySelector('#openchat-widget-style');
     if (existing) {
@@ -376,10 +376,10 @@
     shadowRoot.appendChild(st);
   }
 
-  function setError(msg){ state.error = msg; render(); }
-  function clearError(){ state.error = null; }
+  function setError(msg) { state.error = msg; render(); }
+  function clearError() { state.error = null; }
 
-  function getHostIdentityToken(){
+  function getHostIdentityToken() {
     try {
       if (window.OpenChatHostIdentityToken && typeof window.OpenChatHostIdentityToken === 'string') return window.OpenChatHostIdentityToken;
       if (typeof window.OpenChatHostIdentityTokenFn === 'function') {
@@ -388,11 +388,11 @@
       }
       var tag = document.querySelector('script[data-openchat-host-token]');
       if (tag && tag.getAttribute('data-openchat-host-token')) return tag.getAttribute('data-openchat-host-token');
-    } catch(e){}
+    } catch (e) { }
     return null;
   }
 
-  async function createSession(){
+  async function createSession() {
     diag('Session creation started.');
     diagnostics.sessionRequested = true;
     var body = { page_url: location.href, is_help_page: (location.pathname === '/help' || (location.pathname || '').indexOf('/help/') === 0) };
@@ -408,7 +408,7 @@
     diag('Session creation completed. is_guest=' + s.is_guest);
   }
 
-  async function ensureSession(){
+  async function ensureSession() {
     loadSession();
     if (!state.sessionToken) {
       await createSession();
@@ -422,7 +422,7 @@
       saveSession();
       diagnostics.sessionReady = true;
       diag('Existing session restored. Conversations=' + state.conversations.length);
-    } catch(e) {
+    } catch (e) {
       if (e.status === 401) {
         clearSession();
         await createSession();
@@ -432,16 +432,16 @@
     }
   }
 
-  async function loadConversations(){
+  async function loadConversations() {
     try {
       state.conversations = await api('/conversations');
       render();
-    } catch(e){
+    } catch (e) {
       logError('loadConversations', e);
     }
   }
 
-  async function loadDetail(id){
+  async function loadDetail(id) {
     state.loading = true;
     state.activeId = id;
     render();
@@ -450,7 +450,7 @@
       api('/conversations/' + id + '/read', { method: 'POST' }).catch(function(){});
       await loadConversations();
       clearError();
-    } catch(e){
+    } catch (e) {
       logError('loadDetail', e);
       setError(e.message || 'Failed to load conversation');
     } finally {
@@ -459,7 +459,7 @@
     }
   }
 
-  async function startConversation(initialMessage){
+  async function startConversation(initialMessage) {
     state.loading = true;
     render();
     try {
@@ -473,7 +473,7 @@
       state.activeId = d.id;
       await loadConversations();
       clearError();
-    } catch(e){
+    } catch (e) {
       logError('startConversation', e);
       setError(e.message || 'Failed to start conversation');
     } finally {
@@ -482,62 +482,11 @@
     }
   }
 
-  async function uploadAttachment(file){
-    if (!state.detail || !file) return null;
-    var fd = new FormData();
-    fd.append('file', file);
-    var url = API_BASE + '/conversations/' + state.detail.id + '/attachments';
-    var res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'x-widget-session': state.sessionToken || '',
-      },
-      body: fd,
-    });
-    if (!res.ok) {
-      var err = await res.json().catch(function(){ return {}; });
-      throw new Error(err.detail || 'Attachment upload failed');
-    }
-    return await res.json();
-  }
-
-  async function reopenConversation(convId){
-    try {
-      await api('/conversations/' + convId + '/reopen', { method: 'POST' });
-      state.activeTab = 'chat';
-      await loadDetail(convId);
-      await loadConversations();
-      render();
-    } catch(e) {
-      logError('reopenConversation', e);
-      setError(e.message || 'Failed to reopen conversation');
-    }
-  }
-
-  async function sendMessage(explicitContent, explicitClientId){
+  async function sendMessage(explicitContent, explicitClientId) {
     if (!state.detail || state.sending) return;
     var ta = $('#ocw-text');
     var content = (explicitContent !== undefined && explicitContent !== null) ? String(explicitContent).trim() : (ta ? ta.value.trim() : '');
-    var hasAttachment = Boolean(state.selectedAttachment);
-    if (!content && !hasAttachment) return;
-
-    if (hasAttachment) {
-      var fileToUpload = state.selectedAttachment.file;
-      state.selectedAttachment = null;
-      try {
-        await uploadAttachment(fileToUpload);
-        await loadDetail(state.detail.id);
-      } catch(err) {
-        logError('uploadAttachment', err);
-        setError(err.message || 'Failed to upload attachment');
-        render();
-      }
-      if (!content) {
-        state.sending = false;
-        render();
-        return;
-      }
-    }
+    if (!content) return;
 
     var clientId = explicitClientId || ('client_' + nowId());
     state.sending = true;
@@ -583,7 +532,7 @@
         json: true,
         body: JSON.stringify({ content: content, client_message_id: clientId })
       });
-      state.detail.messages = state.detail.messages.map(function(m){
+      state.detail.messages = state.detail.messages.map(function (m) {
         if (m.client_message_id === clientId || m.id === optimistic.id || m.id === 'tmp_' + clientId) {
           return Object.assign({}, msg, { delivery_status: 'delivered' });
         }
@@ -591,9 +540,9 @@
       });
       state.sending = false;
       await loadDetail(state.detail.id);
-    } catch(e){
+    } catch (e) {
       logError('sendMessage', e);
-      state.detail.messages = state.detail.messages.map(function(m){
+      state.detail.messages = state.detail.messages.map(function (m) {
         if (m.client_message_id === clientId || m.id === optimistic.id || m.id === 'tmp_' + clientId) {
           return Object.assign({}, m, { delivery_status: 'failed', failed_content: content });
         }
@@ -608,7 +557,7 @@
     render();
   }
 
-  async function requestHuman(){
+  async function requestHuman() {
     if (!state.detail) return;
     clearError();
     try {
@@ -617,30 +566,30 @@
       if (r && r.message) {
         state.info = r.message;
         render();
-        setTimeout(function(){ state.info = null; render(); }, 4000);
+        setTimeout(function () { state.info = null; render(); }, 4000);
       }
-    } catch(e){
+    } catch (e) {
       logError('requestHuman', e);
       setError(e.message || 'Failed to request human support');
     }
   }
 
-  function startPolling(){
+  function startPolling() {
     stopPolling();
-    state.poll = setInterval(async function(){
+    state.poll = setInterval(async function () {
       if (!state.open || state.minimized) return;
       try {
         if (state.detail && state.activeId) {
           var d = await api('/conversations/' + state.activeId);
           // Preserve any in-flight or failed optimistic messages
-          var localPending = (state.detail.messages || []).filter(function(m){
+          var localPending = (state.detail.messages || []).filter(function (m) {
             return m.delivery_status === 'sending' || m.delivery_status === 'failed';
           });
           var confirmedClientIds = {};
-          (d.messages || []).forEach(function(m){
+          (d.messages || []).forEach(function (m) {
             if (m.client_message_id) confirmedClientIds[m.client_message_id] = true;
           });
-          var unconfirmed = localPending.filter(function(m){
+          var unconfirmed = localPending.filter(function (m) {
             return !confirmedClientIds[m.client_message_id];
           });
           d.messages = (d.messages || []).concat(unconfirmed);
@@ -649,19 +598,19 @@
         await loadConversations();
         if (state.offline) { state.offline = false; }
         render();
-      } catch(e){
+      } catch (e) {
         if (e && e.status === 401) {
-          try { clearSession(); await createSession(); } catch(_){}
+          try { clearSession(); await createSession(); } catch (_) { }
         }
       }
     }, 3000);
   }
 
-  function stopPolling(){
+  function stopPolling() {
     if (state.poll) { clearInterval(state.poll); state.poll = null; }
   }
 
-  function render(){
+  function render() {
     diag('Render function called. Open=' + state.open);
     var host = getHostRoot();
     if (!host || !shadowRoot) {
@@ -716,10 +665,6 @@
     if (state.open) {
       panel += '<div class="ocw-panel ' + pos + '">';
       panel += '<div class="ocw-header" style="background:' + esc(primary) + '"><div><div class="ocw-title">' + esc(cfg.widget_title || cfg.brand_name || 'Support') + '</div><div class="ocw-sub">' + esc(cfg.greeting_text || 'We are here to help') + '</div></div><div class="ocw-topbar">' + (state.detail ? '<button class="ocw-iconbtn" id="ocw-back" title="Back">←</button>' : '') + '<button class="ocw-iconbtn" id="ocw-min" title="Minimize">_</button><button class="ocw-iconbtn" id="ocw-close" title="Close">×</button></div></div>';
-      panel += '<div class="ocw-tabs" style="display:flex;gap:4px;padding:6px 12px;background:' + esc(primary) + ';filter:brightness(0.93);border-bottom:1px solid rgba(0,0,0,0.06);">';
-      panel += '<button type="button" class="ocw-tab-btn" id="ocw-tab-chat" style="flex:1;padding:5px 8px;border-radius:6px;border:none;font-size:12px;font-weight:600;cursor:pointer;' + (state.activeTab !== 'chats' ? 'background:#fff;color:' + esc(primary) + ';box-shadow:0 1px 2px rgba(0,0,0,0.1);' : 'background:rgba(255,255,255,0.15);color:#fff;') + '">💬 Chat</button>';
-      panel += '<button type="button" class="ocw-tab-btn" id="ocw-tab-chats" style="flex:1;padding:5px 8px;border-radius:6px;border:none;font-size:12px;font-weight:600;cursor:pointer;' + (state.activeTab === 'chats' ? 'background:#fff;color:' + esc(primary) + ';box-shadow:0 1px 2px rgba(0,0,0,0.1);' : 'background:rgba(255,255,255,0.15);color:#fff;') + '">📋 My Chats (' + (state.conversations ? state.conversations.length : 0) + ')</button>';
-      panel += '</div>';
       if (state.minimized) {
         panel += '<div class="ocw-body"><div class="ocw-empty">Chat minimized. Click below or launcher to restore.</div></div></div>';
       } else {
@@ -767,14 +712,14 @@
           var topics = (cfg.bot_flow && cfg.bot_flow.issues && cfg.bot_flow.issues.length)
             ? cfg.bot_flow.issues
             : [
-                { title: "📦 Order or Booking" },
-                { title: "💳 Payment Issues" },
-                { title: "🔄 Refund or Cancellation" },
-                { title: "ℹ️ Product Information" },
-                { title: "🛠️ Technical Support" },
-                { title: "❓ Other Questions" }
-              ];
-          topics.forEach(function(top){
+              { title: "📦 Order or Booking" },
+              { title: "💳 Payment Issues" },
+              { title: "🔄 Refund or Cancellation" },
+              { title: "ℹ️ Product Information" },
+              { title: "🛠️ Technical Support" },
+              { title: "❓ Other Questions" }
+            ];
+          topics.forEach(function (top) {
             var title = esc(top.title || top);
             panel += '<button type="button" class="ocw-topic-btn" data-topic="' + title + '" style="text-align:left;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:space-between"><span>' + title + '</span><span style="color:#94a3b8">→</span></button>';
           });
@@ -782,7 +727,7 @@
           panel += '<div style="margin:14px 0 8px;font-size:12px;color:#64748b;font-weight:600">Your conversations</div>';
           if (state.conversations && state.conversations.length) {
             panel += '<div class="ocw-list">';
-            state.conversations.forEach(function(c){
+            state.conversations.forEach(function (c) {
               var badge = '';
               if (c.status) badge = '<span class="ocw-badge">' + esc(c.status) + '</span>';
               panel += '<button data-id="' + c.id + '"><strong>' + esc(c.subject || 'Conversation') + '</strong>' + badge + '<div style="font-size:11px;color:#64748b;margin-top:2px">' + esc(c.last_message || 'No messages yet') + '</div></button>';
@@ -794,7 +739,7 @@
         } else {
           panel += '<div class="ocw-list" style="flex:1;overflow-y:auto">';
           if (state.detail.messages && state.detail.messages.length) {
-            state.detail.messages.forEach(function(m){
+            state.detail.messages.forEach(function (m) {
               var cls = 'ocw-msg';
               if (m.sender_type === 'customer') cls += ' ocw-user';
               else if (m.sender_type === 'agent') cls += ' ocw-agent';
@@ -821,21 +766,12 @@
               }
 
               var senderLabel = (m.sender_type === 'customer') ? 'You' : 'OpenChat Support';
-              var attachHtml = '';
-              if (m.attachments && m.attachments.length) {
-                attachHtml += '<div class="ocw-bubble-attachments" style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">';
-                m.attachments.forEach(function(att){
-                  var dlUrl = att.download_url || (API_BASE + '/attachments/' + att.id + '/download?session=' + encodeURIComponent(state.sessionToken || ''));
-                  attachHtml += '<a href="' + dlUrl + '" target="_blank" rel="noopener noreferrer" style="display:block;border-radius:6px;overflow:hidden;border:1px solid rgba(0,0,0,0.1);"><img src="' + dlUrl + '" alt="' + esc(att.original_filename) + '" style="max-width:100%;max-height:160px;display:block;object-fit:contain;background:rgba(0,0,0,0.03);"/><span style="display:block;font-size:10px;padding:2px 4px;opacity:0.8;text-align:left;">' + esc(att.original_filename) + '</span></a>';
-                });
-                attachHtml += '</div>';
-              }
-              panel += '<div class="' + cls + '"><div class="ocw-bubble" style="' + bubbleStyle + '">' + content + attachHtml + '</div><div class="ocw-meta">' + senderLabel + ' • ' + fmtTime(m.created_at) + statusBadge + '</div></div>';
+              panel += '<div class="' + cls + '"><div class="ocw-bubble" style="' + bubbleStyle + '">' + content + '</div><div class="ocw-meta">' + senderLabel + ' • ' + fmtTime(m.created_at) + statusBadge + '</div></div>';
 
               // Contextual multi-level bot flow options
               if (m.sender_type !== 'customer' && m.ai_metadata && m.ai_metadata.options && m.ai_metadata.options.length) {
                 panel += '<div class="ocw-options-group" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px;padding-left:4px">';
-                m.ai_metadata.options.forEach(function(opt){
+                m.ai_metadata.options.forEach(function (opt) {
                   var optLabel = esc(opt.label || opt.value || opt);
                   var optVal = esc(opt.value || opt.label || opt);
                   panel += '<button type="button" class="ocw-qr-btn" data-qr="' + optVal + '" style="font-size:12px;padding:6px 12px;border-radius:14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;cursor:pointer;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all 0.15s ease;text-align:left">' + optLabel + '</button>';
@@ -936,14 +872,14 @@
         zIndex: style ? style.zIndex : null
       });
 
-      launchBtn.onclick = function(){
+      launchBtn.onclick = function () {
         state.open = true;
         render();
-        ensureSession().then(async function(){
+        ensureSession().then(async function () {
           await loadConversations();
           render();
           startPolling();
-        }).catch(function(err){
+        }).catch(function (err) {
           logError('Launcher open -> ensureSession', err);
           setError(err.message || 'Failed to initialize session');
         });
@@ -956,22 +892,22 @@
 
     var closeBtn = $('#ocw-close');
     if (closeBtn) {
-      closeBtn.onclick = function(){ state.open = false; stopPolling(); render(); };
+      closeBtn.onclick = function () { state.open = false; stopPolling(); render(); };
     }
     var minBtn = $('#ocw-min');
     if (minBtn) {
-      minBtn.onclick = function(){ state.minimized = !state.minimized; render(); };
+      minBtn.onclick = function () { state.minimized = !state.minimized; render(); };
     }
     var backBtn = $('#ocw-back');
     if (backBtn) {
-      backBtn.onclick = function(){ state.detail = null; state.activeId = null; render(); };
+      backBtn.onclick = function () { state.detail = null; state.activeId = null; render(); };
     }
     var startBtn = $('#ocw-start');
     if (startBtn) {
-      startBtn.onclick = function(){
-        ensureSession().then(function(){
+      startBtn.onclick = function () {
+        ensureSession().then(function () {
           return startConversation();
-        }).catch(function(err){
+        }).catch(function (err) {
           logError('startBtn -> ensureSession', err);
           setError(err.message || 'Cannot start conversation without session');
         });
@@ -1102,7 +1038,7 @@
 
     var sendBtn = $('#ocw-send');
     if (sendBtn) {
-      sendBtn.onclick = function(){
+      sendBtn.onclick = function () {
         if (!state.sending) {
           sendMessage();
         }
@@ -1115,12 +1051,12 @@
       }
       if (isInputFocused) {
         textInput.focus();
-        try { textInput.setSelectionRange(cursorStart, cursorEnd); } catch(_) {}
+        try { textInput.setSelectionRange(cursorStart, cursorEnd); } catch (_) { }
       }
-      textInput.oninput = function(){
+      textInput.oninput = function () {
         state.draft = textInput.value;
       };
-      textInput.onkeydown = function(e){
+      textInput.onkeydown = function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           if (!state.sending) {
@@ -1130,8 +1066,8 @@
       };
     }
     var retryButtons = $$('.ocw-retry-btn');
-    retryButtons.forEach(function(btn){
-      btn.onclick = function(e){
+    retryButtons.forEach(function (btn) {
+      btn.onclick = function (e) {
         e.stopPropagation();
         var c = btn.getAttribute('data-content');
         var cid = btn.getAttribute('data-cid');
@@ -1139,21 +1075,21 @@
       };
     });
     var topicButtons = $$('.ocw-topic-btn');
-    topicButtons.forEach(function(btn){
-      btn.onclick = function(e){
+    topicButtons.forEach(function (btn) {
+      btn.onclick = function (e) {
         e.stopPropagation();
         var topic = btn.getAttribute('data-topic');
-        ensureSession().then(function(){
+        ensureSession().then(function () {
           return startConversation(topic);
-        }).catch(function(err){
+        }).catch(function (err) {
           logError('topicBtn -> ensureSession', err);
           setError(err.message || 'Cannot start conversation');
         });
       };
     });
     var qrButtons = $$('.ocw-qr-btn');
-    qrButtons.forEach(function(btn){
-      btn.onclick = function(e){
+    qrButtons.forEach(function (btn) {
+      btn.onclick = function (e) {
         e.stopPropagation();
         var qr = btn.getAttribute('data-qr');
         if (!state.sending) {
@@ -1170,15 +1106,15 @@
       humanBtn.onclick = requestHuman;
     }
     var listButtons = $$('.ocw-list button[data-id]');
-    listButtons.forEach(function(btn){
-      btn.onclick = function(){
+    listButtons.forEach(function (btn) {
+      btn.onclick = function () {
         var id = btn.getAttribute('data-id');
         loadDetail(parseInt(id, 10));
       };
     });
   }
 
-  async function init(){
+  async function init() {
     diag('Initialization started.');
     diagnostics.initStarted = true;
     render();
@@ -1193,7 +1129,7 @@
       diagnostics.config = state.config;
       diag('Configuration response received.', { title: state.config.widget_title, primary: state.config.primary_color });
       render();
-    } catch(e) {
+    } catch (e) {
       logError('Configuration request', e);
       state.error = 'Backend config unavailable: ' + (e.message || 'unknown error');
       render();
@@ -1203,12 +1139,12 @@
       diag('Pre-warming session check...');
       await ensureSession();
       diag('Pre-warming session check succeeded.');
-    } catch(e) {
+    } catch (e) {
       logError('Session check during init', e);
     }
   }
 
-  function startWhenReady(){
+  function startWhenReady() {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', init);
     } else {

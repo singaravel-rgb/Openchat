@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.enums import MessageSenderType, MessageType
 from app.db.base import Base
 from app.models.user import User
+from app.models.attachment import Attachment
 
 
 class Message(Base):

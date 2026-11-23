@@ -118,11 +118,20 @@ jobs:
         run: |
           echo "Verifying live staging health endpoint..."
           python3 -c "
-          import urllib.request, json
-          res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/health', timeout=15)
-          print('Health Check Status:', res.getcode(), res.read().decode())
-          cfg_res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/api/v1/widget/config', timeout=15)
-          print('Widget Config Status:', cfg_res.getcode())
-          embed_res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/api/v1/widget/embed.js', timeout=15)
-          print('Widget Embed Status:', embed_res.getcode())
+          import urllib.request, json, time, sys
+          for attempt in range(20):
+              try:
+                  res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/health', timeout=15)
+                  print('Health Check Status:', res.getcode(), res.read().decode().strip())
+                  cfg_res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/api/v1/widget/config', timeout=15)
+                  print('Widget Config Status:', cfg_res.getcode())
+                  embed_res = urllib.request.urlopen('https://packs-disposition-drink-notebooks.trycloudflare.com/api/v1/widget/embed.js', timeout=15)
+                  print('Widget Embed Status:', embed_res.getcode())
+                  print('Smoke test PASSED!')
+                  sys.exit(0)
+              except Exception as e:
+                  print(f'Attempt {attempt+1}/20: waiting for services to be ready ({e})...')
+                  time.sleep(5)
+          print('Smoke test timed out.')
+          sys.exit(1)
           "
