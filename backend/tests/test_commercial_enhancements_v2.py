@@ -190,3 +190,66 @@ def test_business_hours_timezone_and_holiday(db_session):
     st_hol = get_business_hours_status(db_session)
     assert st_hol["is_open"] is False
     assert "Holiday" in st_hol["reason"]
+
+
+def test_business_hours_settings_no_timezone_collision(db_session):
+    from app.api.v1.admin_settings import bulk_update_settings, get_settings
+    from app.schemas.setting import SettingsBulkUpdate
+
+    admin = db_session.query(User).filter(User.role == "admin").first()
+
+    # Initialize general settings first (which creates key="timezone")
+    gen = get_settings("general", db=db_session, current_user=admin)
+    gen_tz = next(s for s in gen if s.key == "timezone")
+    assert gen_tz.value == "UTC"
+
+    # Repeated GET on business_hours must succeed with no IntegrityError
+    bh1 = get_settings("business_hours", db=db_session, current_user=admin)
+    bh2 = get_settings("business_hours", db=db_session, current_user=admin)
+    assert any(s.key == "business_hours_timezone" for s in bh1)
+    assert any(s.key == "business_hours_timezone" for s in bh2)
+
+    # Update business_hours_timezone and verify general.timezone is untouched
+    bulk_update_settings(
+        "business_hours",
+        SettingsBulkUpdate(settings={"business_hours_timezone": "Asia/Kolkata", "out_of_hours_message": "Away"}),
+        db=db_session,
+        current_user=admin,
+    )
+    gen_after = get_settings("general", db=db_session, current_user=admin)
+    assert next(s for s in gen_after if s.key == "timezone").value == "UTC"
+    bh_cfg = get_business_hours_status(db_session)
+    assert bh_cfg["timezone"] == "Asia/Kolkata"
+    assert bh_cfg["out_of_hours_message"] == "Away"
+
+
+def test_agent_deactivation_reassigns_active_conversations(db_session):
+    from app.api.v1.admin_users import update_user
+    from app.schemas.user_management import UserUpdateRequest
+
+    admin = db_session.query(User).filter(User.role == "admin").first()
+    agent1 = db_session.query(User).filter(User.email == "agent1@test.com").first()
+    agent2 = db_session.query(User).filter(User.email == "agent2@test.com").first()
+    customer = db_session.query(User).filter(User.role == "customer").first()
+
+    conv = Conversation(
+        chat_id="OC-DEACT-1",
+        customer_id=customer.id,
+        assigned_agent_id=agent1.id,
+        status=ConversationStatus.ASSIGNED,
+    )
+    db_session.add(conv)
+    db_session.commit()
+
+    # Deactivate agent1 -> active conversation safely reassigned to agent2
+    update_user(agent1.id, UserUpdateRequest(is_active=False), db=db_session, current_user=admin)
+    db_session.refresh(agent1)
+    db_session.refresh(conv)
+    assert agent1.is_active is False
+    assert conv.assigned_agent_id == agent2.id
+    assert all(a.id != agent1.id for a in get_available_agents(db_session))
+
+    # Reactivate agent1
+    update_user(agent1.id, UserUpdateRequest(is_active=True), db=db_session, current_user=admin)
+    db_session.refresh(agent1)
+    assert agent1.is_active is True

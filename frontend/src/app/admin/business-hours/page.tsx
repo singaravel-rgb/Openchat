@@ -84,7 +84,9 @@ export default function BusinessHoursPage() {
 
       try {
         const bhSettings = await adminApi.getSettings("business_hours");
-        const tz = bhSettings.find((s) => s.key === "timezone")?.value;
+        const tz =
+          bhSettings.find((s) => s.key === "business_hours_timezone")?.value ??
+          bhSettings.find((s) => s.key === "timezone")?.value;
         const msg = bhSettings.find((s) => s.key === "out_of_hours_message")?.value;
         if (tz) setBhTimezone(String(tz));
         if (msg) setOutOfHoursMsg(String(msg));
@@ -292,7 +294,7 @@ export default function BusinessHoursPage() {
                 setConfigSaved(false);
                 try {
                   await adminApi.bulkUpdateSettings("business_hours", {
-                    timezone: bhTimezone,
+                    business_hours_timezone: bhTimezone,
                     out_of_hours_message: outOfHoursMsg,
                   });
                   setConfigSaved(true);

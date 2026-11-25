@@ -62,7 +62,7 @@ DEFAULT_SETTINGS = {
         "auto_escalate_enabled": {"value": True, "description": "Enable automated reassignment on missed deadline"},
     },
     "business_hours": {
-        "timezone": {"value": "UTC", "description": "Support operating timezone (IANA e.g. Asia/Kolkata, America/New_York, UTC)"},
+        "business_hours_timezone": {"value": "UTC", "description": "Support operating timezone (IANA e.g. Asia/Kolkata, America/New_York, UTC)"},
         "out_of_hours_message": {
             "value": "We are currently outside our business hours. Your conversation has been queued and our support team will respond during our next working period.",
             "description": "Custom message shown to customers outside business hours",
@@ -72,24 +72,30 @@ DEFAULT_SETTINGS = {
 
 
 def get_or_create_settings(db: Session, category: str) -> dict[str, Setting]:
-    """Get all settings for a category, creating defaults if needed."""
+    """Get all settings for a category, creating defaults idempotently without key collisions."""
     settings = db.query(Setting).filter(Setting.category == category).all()
     setting_map = {s.key: s for s in settings}
 
-    # Create missing defaults
     defaults = DEFAULT_SETTINGS.get(category, {})
+    created = False
     for key, config in defaults.items():
         if key not in setting_map:
-            setting = Setting(
-                key=key,
-                value=config["value"],
-                category=category,
-                description=config["description"],
-            )
-            db.add(setting)
-            setting_map[key] = setting
+            existing_global = db.query(Setting).filter(Setting.key == key).first()
+            if existing_global:
+                setting_map[key] = existing_global
+            else:
+                setting = Setting(
+                    key=key,
+                    value=config["value"],
+                    category=category,
+                    description=config["description"],
+                )
+                db.add(setting)
+                setting_map[key] = setting
+                created = True
 
-    db.commit()
+    if created:
+        db.commit()
     return setting_map
 
 

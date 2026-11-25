@@ -23,6 +23,39 @@ export default function AdminAgentsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [resetModalData, setResetModalData] = useState<{ agentName: string; resetUrl: string; copied: boolean } | null>(null);
   const [resettingId, setResettingId] = useState<number | null>(null);
+  const [togglingActiveId, setTogglingActiveId] = useState<number | null>(null);
+
+  const handleToggleActive = async (agent: AdminAgent) => {
+    if (agent.is_active) {
+      const ok = window.confirm(
+        `Deactivate ${agent.full_name}? They will be signed out immediately, prevented from logging in, and any active conversations will be safely reassigned or returned to the queue.`
+      );
+      if (!ok) return;
+    }
+    setTogglingActiveId(agent.id);
+    setError(null);
+    try {
+      const updated = await adminApi.updateUser(agent.id, { is_active: !agent.is_active });
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.id === agent.id
+            ? {
+                ...a,
+                is_active: updated.is_active,
+                is_available: updated.is_active ? a.is_available : false,
+                availability_status: updated.is_active ? a.availability_status : 'offline',
+                effective_status: updated.is_active ? a.effective_status : 'offline',
+                active_conversations: updated.is_active ? a.active_conversations : 0,
+              }
+            : a
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update agent status');
+    } finally {
+      setTogglingActiveId(null);
+    }
+  };
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -248,6 +281,23 @@ export default function AdminAgentsPage() {
                             disabled={resettingId === agent.id}
                           >
                             {resettingId === agent.id ? 'Generating...' : 'Reset Password'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className={
+                              agent.is_active
+                                ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20'
+                                : 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20'
+                            }
+                            onClick={() => handleToggleActive(agent)}
+                            disabled={togglingActiveId === agent.id}
+                          >
+                            {togglingActiveId === agent.id
+                              ? 'Updating...'
+                              : agent.is_active
+                              ? 'Deactivate'
+                              : 'Activate'}
                           </Button>
                         </div>
                       </td>

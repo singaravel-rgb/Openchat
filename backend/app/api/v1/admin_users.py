@@ -309,6 +309,30 @@ def update_user(
         except Exception:
             pass
 
+    # Safely handle active conversations & availability when an agent is deactivated
+    if status_changed and not target_user.is_active and target_user.role == "agent":
+        if target_user.agent_profile:
+            target_user.agent_profile.is_available = False
+            target_user.agent_profile.availability_status = "offline"
+            target_user.agent_profile.active_conversations = 0
+        from app.core.enums import ConversationStatus
+        from app.models.conversation import Conversation
+        from app.services.assignment_service import assign_conversation_to_agent
+
+        active_convs = (
+            db.query(Conversation)
+            .filter(
+                Conversation.assigned_agent_id == target_user.id,
+                Conversation.status.notin_([ConversationStatus.RESOLVED, ConversationStatus.CLOSED, ConversationStatus.MERGED]),
+            )
+            .all()
+        )
+        for conv in active_convs:
+            conv.assigned_agent_id = None
+            if conv.status == ConversationStatus.ASSIGNED:
+                conv.status = ConversationStatus.OPEN
+            assign_conversation_to_agent(db, conv)
+
     # Audit log
     audit_action = "user.updated"
     if role_changed:

@@ -16,7 +16,7 @@ def get_business_hours_config(db: Session) -> dict:
     rows = db.query(Setting).filter(Setting.category == "business_hours").all()
     cfg = {r.key: r.value for r in rows}
     return {
-        "timezone": str(cfg.get("timezone") or "UTC"),
+        "timezone": str(cfg.get("business_hours_timezone") or cfg.get("timezone") or "UTC"),
         "out_of_hours_message": str(cfg.get("out_of_hours_message") or DEFAULT_OUT_OF_HOURS_MESSAGE),
     }
 

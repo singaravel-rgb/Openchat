@@ -240,7 +240,7 @@ def list_agents(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    agents = db.query(User).filter(User.role == "agent", User.is_active == True).all()  # noqa: E712
+    agents = db.query(User).filter(User.role == "agent").order_by(User.id.asc()).all()
     result = []
     for agent in agents:
         profile = agent.agent_profile
@@ -252,7 +252,7 @@ def list_agents(
             )
             .count()
         )
-        eff = "offline" if (profile and profile.admin_forced_offline) else (profile.availability_status if profile else "offline")
+        eff = "offline" if (not agent.is_active or (profile and profile.admin_forced_offline)) else (profile.availability_status if profile else "offline")
         if eff == "available" and profile and profile.pause_auto_assignment:
             eff = "busy"
         result.append({
@@ -261,7 +261,7 @@ def list_agents(
             "full_name": agent.full_name,
             "is_active": agent.is_active,
             "is_approved": profile.is_approved if profile else False,
-            "is_available": profile.is_available if profile else False,
+            "is_available": (profile.is_available if profile else False) if agent.is_active else False,
             "availability_status": profile.availability_status if profile else "offline",
             "effective_status": eff,
             "admin_forced_offline": profile.admin_forced_offline if profile else False,
