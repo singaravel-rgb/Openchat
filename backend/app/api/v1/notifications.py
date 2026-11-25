@@ -8,8 +8,15 @@ from app.api.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.notification import Notification, NotificationPriority, NotificationType
 from app.models.user import User
-from app.schemas.notification import NotificationCreate, NotificationList, NotificationRead, NotificationUpdate
-from app.services.email_service import send_email
+from app.schemas.notification import (
+    NotificationCreate,
+    NotificationList,
+    NotificationPreferences,
+    NotificationRead,
+    NotificationUpdate,
+)
+from app.services.email_service import send_email_with_status
+from app.services.notification_service import get_user_notification_prefs
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -89,18 +96,45 @@ def create_notification(
     db.refresh(notification)
 
     # Send email notification if SMTP is configured
+    email_sent = False
+    email_status = "not_applicable"
     try:
         target_user = db.get(User, notification_in.user_id)
         if target_user and target_user.email:
-            send_email(
+            email_sent, email_status = send_email_with_status(
                 to_email=target_user.email,
                 subject=f"[OpenChat] {notification_in.title}",
-                body=notification_in.message,
+                body=notification_in.message or notification_in.title,
             )
     except Exception:
-        pass  # Email failure should not break notification creation
+        email_sent = False
+        email_status = "failed"
+
+    notification.email_sent = email_sent
+    notification.email_status = email_status
+    db.commit()
+    db.refresh(notification)
 
     return NotificationRead.model_validate(notification)
+
+
+@router.get("/preferences", response_model=NotificationPreferences)
+def get_my_notification_preferences(
+    current_user: User = Depends(get_current_user),
+):
+    return NotificationPreferences(**get_user_notification_prefs(current_user))
+
+
+@router.patch("/preferences", response_model=NotificationPreferences)
+def update_my_notification_preferences(
+    prefs_in: NotificationPreferences,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.notification_preferences = prefs_in.model_dump()
+    db.commit()
+    db.refresh(current_user)
+    return NotificationPreferences(**get_user_notification_prefs(current_user))
 
 
 @router.patch("/{notification_id}", response_model=NotificationRead)

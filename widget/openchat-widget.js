@@ -183,7 +183,7 @@
   function getFilteredEmojis(cat, search) {
     var all = [];
     if (!cat || cat === 'all') {
-      Object.keys(EMOJI_CATEGORIES).forEach(function(k){
+      Object.keys(EMOJI_CATEGORIES).forEach(function (k) {
         all = all.concat(EMOJI_CATEGORIES[k]);
       });
     } else if (EMOJI_CATEGORIES[cat]) {
@@ -191,7 +191,7 @@
     }
     if (!search || !search.trim()) return all;
     var q = search.toLowerCase().trim();
-    return all.filter(function(e){
+    return all.filter(function (e) {
       return e.name.toLowerCase().indexOf(q) !== -1 || e.char.indexOf(q) !== -1;
     });
   }
@@ -446,8 +446,11 @@
     state.activeId = id;
     render();
     try {
-      state.detail = await api('/conversations/' + id);
-      api('/conversations/' + id + '/read', { method: 'POST' }).catch(function(){});
+      var shouldMarkRead = Boolean(state.open && !state.minimized && state.activeTab === 'chat');
+      state.detail = await api('/conversations/' + id + (shouldMarkRead ? '?mark_read=true' : ''));
+      if (shouldMarkRead) {
+        api('/conversations/' + id + '/read', { method: 'POST' }).catch(function () { });
+      }
       await loadConversations();
       clearError();
     } catch (e) {
@@ -469,12 +472,9 @@
     } else if (s === 'pending' || s === 'waiting_on_customer' || s === 'on_hold') {
       label = 'Pending';
       style = 'background:#fef3c7;color:#92400e;border:1px solid #fde68a;'; // Pending: Amber/Orange
-    } else if (s === 'assigned' || s === 'human_handling') {
-      label = 'Assigned';
-      style = 'background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;'; // Assigned: Blue
-    } else if (s === 'ai_handling') {
-      label = 'AI Handling';
-      style = 'background:#f3e8ff;color:#6b21a8;border:1px solid #e9d5ff;'; // AI Handling: Purple
+    } else if (s === 'assigned' || s === 'human_handling' || s === 'ai_handling') {
+      label = 'Active';
+      style = 'background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;'; // Active: Blue (do not expose internal AI/assignment status)
     } else if (s === 'closed') {
       label = 'Closed';
       style = 'background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;'; // Closed: Slate/Gray
@@ -607,7 +607,8 @@
       if (!state.open || state.minimized) return;
       try {
         if (state.detail && state.activeId) {
-          var d = await api('/conversations/' + state.activeId);
+          var shouldMark = Boolean(state.open && !state.minimized && state.activeTab === 'chat');
+          var d = await api('/conversations/' + state.activeId + (shouldMark ? '?mark_read=true' : ''));
           // Preserve any in-flight or failed optimistic messages
           var localPending = (state.detail.messages || []).filter(function (m) {
             return m.delivery_status === 'sending' || m.delivery_status === 'failed';
@@ -674,7 +675,7 @@
 
     var totalUnread = 0;
     if (state.conversations && state.conversations.length) {
-      state.conversations.forEach(function(c){ if (c.unread_count) totalUnread += c.unread_count; });
+      state.conversations.forEach(function (c) { if (c.unread_count) totalUnread += c.unread_count; });
     }
     var unreadBadgeHtml = '';
     if (totalUnread > 0) {
@@ -706,6 +707,9 @@
         panel += '</div>';
 
         panel += '<div class="ocw-body">';
+        if (cfg.is_business_open === false && cfg.out_of_hours_message) {
+          panel += '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;font-size:11px;margin-bottom:8px;line-height:1.4;">🕒 ' + esc(cfg.out_of_hours_message) + '</div>';
+        }
         if (state.error) panel += '<div class="ocw-error">' + esc(state.error) + '</div>';
         if (state.info) panel += '<div class="ocw-error" style="background:#ecfeff;color:#155e75;border-color:#a5f3fc">' + esc(state.info) + '</div>';
         if (state.offline) panel += '<div class="ocw-error">You appear to be offline. Messages will send when connection is restored.</div>';
@@ -713,7 +717,7 @@
           panel += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="font-size:13px;font-weight:600;color:#1e293b;">Your Conversations</span><button type="button" id="ocw-new-chat-btn" style="background:' + esc(primary) + ';color:#fff;border:none;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">+ New Chat</button></div>';
           if (state.conversations && state.conversations.length) {
             panel += '<div class="ocw-list" style="display:flex;flex-direction:column;gap:8px;">';
-            state.conversations.forEach(function(c){
+            state.conversations.forEach(function (c) {
               var isResolved = c.status === 'resolved' || c.status === 'closed';
               var chatIdBadge = c.chat_id ? '<span style="font-family:monospace;font-size:10px;padding:2px 6px;border-radius:4px;background:#f1f5f9;color:#475569;font-weight:600;">' + esc(c.chat_id) + '</span>' : '';
               var statusBadge = getWidgetStatusBadge(c.status);
@@ -805,7 +809,14 @@
                   var retryCid = esc(m.client_message_id || m.id);
                   statusBadge = ' <span class="ocw-status-badge" style="color:#dc2626;font-size:10px;font-weight:600;margin-left:4px;">• Failed</span> <button type="button" class="ocw-retry-btn" data-content="' + retryText + '" data-cid="' + retryCid + '" style="background:none;border:none;color:#2563eb;font-size:11px;font-weight:600;cursor:pointer;text-decoration:underline;padding:0 2px;">Retry</button>';
                 } else {
-                  statusBadge = ' <span class="ocw-status-badge" style="color:#64748b;font-size:10px;margin-left:4px;">✓ Delivered</span>';
+                  var isReadByAgent = state.detail.agent_last_read_at && m.created_at && (new Date(state.detail.agent_last_read_at).getTime() >= new Date(m.created_at).getTime());
+                  if (isReadByAgent) {
+                    statusBadge = ' <span class="ocw-status-badge" style="color:#0284c7;font-size:10px;font-weight:600;margin-left:4px;">✓✓ Read</span>';
+                  } else if (status === 'delivered') {
+                    statusBadge = ' <span class="ocw-status-badge" style="color:#64748b;font-size:10px;margin-left:4px;">✓ Delivered</span>';
+                  } else {
+                    statusBadge = ' <span class="ocw-status-badge" style="color:#64748b;font-size:10px;margin-left:4px;">✓ Sent</span>';
+                  }
                 }
               }
 
@@ -856,14 +867,14 @@
               { id: "hearts", label: "❤️ Hearts" },
               { id: "objects", label: "🎉 Objects" }
             ];
-            cats.forEach(function(cat){
+            cats.forEach(function (cat) {
               var isCat = (state.emojiCategory || 'all') === cat.id;
               panel += '<button type="button" class="ocw-emoji-cat" data-cat="' + cat.id + '" style="border:none;background:' + (isCat ? '#e0f2fe;color:#0369a1;' : '#f1f5f9;color:#475569;') + 'border-radius:4px;padding:3px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">' + cat.label + '</button>';
             });
             panel += '</div>';
             panel += '<div id="ocw-emoji-grid" style="display:grid;grid-template-columns:repeat(8, 1fr);gap:4px;max-height:150px;overflow-y:auto;padding-top:4px;">';
             var emList = getFilteredEmojis(state.emojiCategory || 'all', state.emojiSearch || '');
-            emList.forEach(function(em){
+            emList.forEach(function (em) {
               panel += '<button type="button" class="ocw-emoji-item" data-emoji="' + em.char + '" title="' + esc(em.name) + '" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;border-radius:6px;text-align:center;">' + em.char + '</button>';
             });
             panel += '</div>';
@@ -959,13 +970,13 @@
     }
     var tabChat = $('#ocw-tab-chat');
     if (tabChat) {
-      tabChat.onclick = function(){ state.activeTab = 'chat'; render(); };
+      tabChat.onclick = function () { state.activeTab = 'chat'; render(); };
     }
     var tabChats = $('#ocw-tab-chats');
     if (tabChats) {
-      tabChats.onclick = function(){ state.activeTab = 'chats'; loadConversations().then(render); };
+      tabChats.onclick = function () { state.activeTab = 'chats'; loadConversations().then(render); };
     }
-    var triggerNewChat = function(){
+    var triggerNewChat = function () {
       state.activeTab = 'chat';
       state.detail = null;
       state.activeId = null;
@@ -980,8 +991,8 @@
     var attachBtn = $('#ocw-attach-btn');
     var fileInput = $('#ocw-file-input');
     if (attachBtn && fileInput) {
-      attachBtn.onclick = function(){ fileInput.click(); };
-      fileInput.onchange = function(e){
+      attachBtn.onclick = function () { fileInput.click(); };
+      fileInput.onchange = function (e) {
         var file = e.target.files && e.target.files[0];
         e.target.value = '';
         if (!file) return;
@@ -996,14 +1007,14 @@
     }
     var removeAttachBtn = $('#ocw-remove-attach');
     if (removeAttachBtn) {
-      removeAttachBtn.onclick = function(){
+      removeAttachBtn.onclick = function () {
         state.selectedAttachment = null;
         render();
       };
     }
     var emojiBtn = $('#ocw-emoji-btn');
     if (emojiBtn) {
-      emojiBtn.onclick = function(e){
+      emojiBtn.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
         state.showEmojiPicker = !state.showEmojiPicker;
@@ -1012,7 +1023,7 @@
     }
     var emojiClose = $('#ocw-emoji-close');
     if (emojiClose) {
-      emojiClose.onclick = function(e){
+      emojiClose.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
         state.showEmojiPicker = false;
@@ -1021,13 +1032,13 @@
     }
     var emojiSearchInput = $('#ocw-emoji-search');
     if (emojiSearchInput) {
-      emojiSearchInput.oninput = function(e){
+      emojiSearchInput.oninput = function (e) {
         state.emojiSearch = e.target.value;
         var grid = $('#ocw-emoji-grid');
         if (grid) {
           var emList = getFilteredEmojis(state.emojiCategory || 'all', state.emojiSearch || '');
           var gh = '';
-          emList.forEach(function(em){
+          emList.forEach(function (em) {
             gh += '<button type="button" class="ocw-emoji-item" data-emoji="' + em.char + '" title="' + esc(em.name) + '" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;border-radius:6px;text-align:center;">' + em.char + '</button>';
           });
           grid.innerHTML = gh;
@@ -1036,18 +1047,18 @@
       };
     }
     var catBtns = $$('.ocw-emoji-cat');
-    catBtns.forEach(function(btn){
-      btn.onclick = function(e){
+    catBtns.forEach(function (btn) {
+      btn.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
         state.emojiCategory = btn.getAttribute('data-cat');
         render();
       };
     });
-    function bindEmojiItems(){
+    function bindEmojiItems() {
       var emojiBtns = $$('.ocw-emoji-item');
-      emojiBtns.forEach(function(btn){
-        btn.onclick = function(e){
+      emojiBtns.forEach(function (btn) {
+        btn.onclick = function (e) {
           e.preventDefault();
           e.stopPropagation();
           var em = btn.getAttribute('data-emoji');
@@ -1066,16 +1077,16 @@
     }
     bindEmojiItems();
     var reopenBtns = $$('.ocw-reopen-btn');
-    reopenBtns.forEach(function(btn){
-      btn.onclick = function(e){
+    reopenBtns.forEach(function (btn) {
+      btn.onclick = function (e) {
         e.stopPropagation();
         var cid = parseInt(btn.getAttribute('data-id'), 10);
         reopenConversation(cid);
       };
     });
     var convOpenLinks = $$('.ocw-conv-open');
-    convOpenLinks.forEach(function(el){
-      el.onclick = function(e){
+    convOpenLinks.forEach(function (el) {
+      el.onclick = function (e) {
         e.stopPropagation();
         var cid = parseInt(el.getAttribute('data-id'), 10);
         state.activeTab = 'chat';
@@ -1192,23 +1203,23 @@
   }
 
   window.OpenChat = {
-    open: function() {
+    open: function () {
       state.open = true;
       render();
-      ensureSession().then(async function() {
+      ensureSession().then(async function () {
         await loadConversations();
         render();
         startPolling();
-      }).catch(function(err){
+      }).catch(function (err) {
         logError('OpenChat.open', err);
       });
     },
-    close: function() {
+    close: function () {
       state.open = false;
       stopPolling();
       render();
     },
-    newChat: function() {
+    newChat: function () {
       state.open = true;
       state.activeTab = 'chat';
       state.detail = null;
@@ -1219,10 +1230,10 @@
   };
 
   try {
-    window.addEventListener('openchat:open', function() {
+    window.addEventListener('openchat:open', function () {
       window.OpenChat.open();
     });
-  } catch (e) {}
+  } catch (e) { }
 
   function startWhenReady() {
     if (document.readyState === 'loading') {

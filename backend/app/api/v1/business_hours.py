@@ -19,7 +19,11 @@ from app.schemas.business_hours import (
 router = APIRouter(prefix="/business-hours", tags=["Business Hours"])
 
 
-def require_admin_or_agent(current_user: User = Depends(require_roles("agent", "admin"))) -> User:
+def require_admin_or_agent(current_user: User = Depends(require_roles("agent", "admin", "super_admin"))) -> User:
+    return current_user
+
+
+def require_admin_only(current_user: User = Depends(require_roles("admin", "super_admin"))) -> User:
     return current_user
 
 
@@ -29,7 +33,7 @@ def require_admin_or_agent(current_user: User = Depends(require_roles("agent", "
 def create_business_hours(
     data: BusinessHoursCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
+    current_user: User = Depends(require_admin_only),
 ):
     """Create business hours for a day of the week."""
     existing = db.query(BusinessHours).filter(BusinessHours.day_of_week == data.day_of_week).first()
@@ -68,7 +72,7 @@ def list_business_hours(
 def create_holiday(
     data: HolidayCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
+    current_user: User = Depends(require_admin_only),
 ):
     """Create a holiday."""
     existing = db.query(Holiday).filter(Holiday.holiday_date == data.holiday_date).first()
@@ -118,7 +122,7 @@ def update_holiday(
     holiday_id: int,
     data: HolidayUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
+    current_user: User = Depends(require_admin_only),
 ):
     """Update a holiday."""
     holiday = db.query(Holiday).filter(Holiday.id == holiday_id).first()
@@ -137,7 +141,7 @@ def update_holiday(
 def delete_holiday(
     holiday_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
+    current_user: User = Depends(require_admin_only),
 ):
     """Delete a holiday."""
     holiday = db.query(Holiday).filter(Holiday.id == holiday_id).first()
@@ -154,37 +158,9 @@ def is_business_open(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin_or_agent),
 ):
-    """Check if the business is currently open based on business hours and holidays."""
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
-    day_of_week = now.weekday()  # 0=Monday, 6=Sunday
-    current_time = now.time()
-    today_date = now.date()
-
-    # Check if today is a holiday
-    holiday = (
-        db.query(Holiday)
-        .filter(Holiday.holiday_date == today_date, Holiday.is_active == True)  # noqa: E712
-        .first()
-    )
-    if holiday:
-        return {"is_open": False, "reason": f"Holiday: {holiday.name}"}
-
-    # Check business hours for today
-    bh = (
-        db.query(BusinessHours)
-        .filter(BusinessHours.day_of_week == day_of_week, BusinessHours.is_active == True)  # noqa: E712
-        .first()
-    )
-
-    if not bh or bh.is_closed:
-        return {"is_open": False, "reason": "Closed on this day"}
-
-    if bh.start_time <= current_time <= bh.end_time:
-        return {"is_open": True, "reason": "Within business hours"}
-    else:
-        return {"is_open": False, "reason": "Outside business hours"}
+    """Check if the business is currently open based on business hours, timezone, and holidays."""
+    from app.services.business_hours_service import get_business_hours_status
+    return get_business_hours_status(db)
 
 
 # ===== Day-specific Business Hours Endpoints =====
@@ -207,7 +183,7 @@ def update_business_hours(
     bh_id: int,
     data: BusinessHoursUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
+    current_user: User = Depends(require_admin_only),
 ):
     """Update business hours."""
     bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()
@@ -226,7 +202,7 @@ def update_business_hours(
 def delete_business_hours(
     bh_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_agent),
+    current_user: User = Depends(require_admin_only),
 ):
     """Delete business hours."""
     bh = db.query(BusinessHours).filter(BusinessHours.id == bh_id).first()

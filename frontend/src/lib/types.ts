@@ -7,6 +7,9 @@ export interface User {
   agent_profile?: {
     is_available: boolean;
     is_approved: boolean;
+    availability_status?: 'available' | 'busy' | 'offline';
+    admin_forced_offline?: boolean;
+    pause_auto_assignment?: boolean;
     max_conversations: number;
     active_conversations: number;
   };
@@ -31,6 +34,9 @@ export interface UserDetail {
   agent_profile?: {
     is_available: boolean;
     is_approved: boolean;
+    availability_status?: 'available' | 'busy' | 'offline';
+    admin_forced_offline?: boolean;
+    pause_auto_assignment?: boolean;
     max_conversations: number;
     active_conversations: number;
   };
@@ -72,6 +78,7 @@ export interface Conversation {
   customer_last_read_at?: string | null;
   agent_last_read_at?: string | null;
   merged_into_id?: number | null;
+  version?: number;
 }
 
 export type ConversationStatus =
@@ -201,6 +208,10 @@ export interface AgentWorkload {
   active: number;
   max: number;
   available: boolean;
+  availability_status?: 'available' | 'busy' | 'offline';
+  effective_status?: 'available' | 'busy' | 'offline';
+  admin_forced_offline?: boolean;
+  pause_auto_assignment?: boolean;
   capacity_remaining: number;
 }
 
@@ -244,9 +255,36 @@ export interface AdminAgent {
   full_name: string;
   is_active: boolean;
   is_available: boolean;
+  availability_status?: 'available' | 'busy' | 'offline';
+  effective_status?: 'available' | 'busy' | 'offline';
+  admin_forced_offline?: boolean;
+  pause_auto_assignment?: boolean;
   max_conversations: number;
   active_conversations: number;
   capacity_remaining: number;
+}
+
+export interface TagItem {
+  id: number;
+  name: string;
+  color: string;
+  description?: string | null;
+  is_active: boolean;
+}
+
+export interface NotificationPreferences {
+  in_app_assigned: boolean;
+  in_app_new_message: boolean;
+  in_app_reassigned: boolean;
+  in_app_pending: boolean;
+  in_app_sla_warning: boolean;
+  in_app_sla_breach: boolean;
+  email_assigned: boolean;
+  email_new_message: boolean;
+  email_reassigned: boolean;
+  email_pending: boolean;
+  email_sla_warning: boolean;
+  email_sla_breach: boolean;
 }
 
 export type QueueType = 'inbox' | 'pending' | 'assigned' | 'resolved';
@@ -325,6 +363,8 @@ export interface Notification {
   reference_id: number | null;
   is_read: boolean;
   read_at: string | null;
+  email_sent?: boolean;
+  email_status?: string;
   created_at: string;
 }
 
@@ -747,6 +787,8 @@ export interface HolidayUpdate {
 export interface BusinessOpenStatus {
   is_open: boolean;
   reason: string;
+  timezone?: string;
+  out_of_hours_message?: string;
 }
 
 export interface BotFlow {

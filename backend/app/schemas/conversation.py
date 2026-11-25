@@ -16,6 +16,7 @@ class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=10000)
     is_internal: bool = False
     client_message_id: Optional[str] = Field(default=None, max_length=100)
+    expected_version: Optional[int] = None
 
 
 class MessageEdit(BaseModel):
@@ -53,6 +54,7 @@ class ConversationUpdate(BaseModel):
     subject: Optional[str] = Field(default=None, max_length=255)
     priority: Optional[str] = Field(default=None, max_length=20)
     tags: Optional[List[str]] = None
+    expected_version: Optional[int] = None
 
 
 class ConversationResponse(BaseModel):
@@ -75,6 +77,7 @@ class ConversationResponse(BaseModel):
     customer_last_read_at: Optional[datetime] = None
     agent_last_read_at: Optional[datetime] = None
     merged_into_id: Optional[int] = None
+    version: int = 1
 
 
 class ConversationLinkCreate(BaseModel):
@@ -158,6 +161,7 @@ class ConversationListItem(BaseModel):
     unread_count: int = 0
     user_last_read_at: Optional[datetime] = None
     merged_into_id: Optional[int] = None
+    version: int = 1
 
 
 class MarkReadRequest(BaseModel):
@@ -174,8 +178,10 @@ class ConversationListResponse(BaseModel):
 class AssignRequest(BaseModel):
     agent_id: Optional[int] = None
     note: Optional[str] = None
+    expected_version: Optional[int] = None
 
 
 class StatusUpdateRequest(BaseModel):
     status: Optional[str] = None
     resolution_details: Optional[str] = None
+    expected_version: Optional[int] = None

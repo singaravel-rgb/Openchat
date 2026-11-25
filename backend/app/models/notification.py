@@ -11,6 +11,8 @@ from app.db.base import Base
 class NotificationType(str, PyEnum):
     NEW_MESSAGE = "new_message"
     CONVERSATION_ASSIGNED = "conversation_assigned"
+    CONVERSATION_REASSIGNED = "conversation_reassigned"
+    CONVERSATION_PENDING = "conversation_pending"
     CONVERSATION_REOPENED = "conversation_reopened"
     MENTION = "mention"
     SLA_WARNING = "sla_warning"
@@ -41,6 +43,9 @@ class Notification(Base):
     reference_id = Column(Integer, nullable=True)
     is_read = Column(Boolean, default=False, nullable=False)
     read_at = Column(DateTime, nullable=True)
+    email_sent = Column(Boolean, default=False, nullable=False)
+    email_status = Column(String(40), default="not_applicable", nullable=False)
+    dedup_key = Column(String(160), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     user = relationship("User", back_populates="notifications")

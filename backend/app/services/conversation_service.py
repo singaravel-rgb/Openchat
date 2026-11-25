@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_, distinct, text, select, exists
+from sqlalchemy import func, or_, and_, distinct, text, select, exists, cast, String, case
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
@@ -62,6 +62,9 @@ def list_conversations_query(
     customer_id: Optional[int] = None,
     handling: Optional[str] = None,
     filter_type: Optional[str] = None,
+    priority: Optional[str] = None,
+    tag: Optional[str] = None,
+    sort_by: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
@@ -231,6 +234,15 @@ def list_conversations_query(
         elif ft in ("sla_breached", "missed_deadlines", "breached"):
             query = query.filter(Conversation.sla_response_breached == True)
 
+    if priority:
+        p = priority.lower().strip()
+        if p in ("low", "normal", "high", "urgent"):
+            query = query.filter(Conversation.priority == p)
+
+    if tag and tag.strip():
+        t_clean = tag.strip().replace('"', "")
+        query = query.filter(cast(Conversation.tags, String).ilike(f'%"{t_clean}"%'))
+
     if q:
         like = f"%{q.strip()}%"
         # Search merged secondary conversations so searching their Chat ID returns the primary conversation
@@ -259,8 +271,38 @@ def list_conversations_query(
         query = query.filter(Conversation.id.in_(subq_stmt))
 
     total = query.with_entities(func.count(func.distinct(Conversation.id))).scalar() if q else query.count()
-    items = query.order_by(Conversation.updated_at.desc(), Conversation.id.desc()).offset(offset).limit(limit).all()
+    if sort_by == "priority_desc":
+        prio_rank = case(
+            (Conversation.priority == "urgent", 4),
+            (Conversation.priority == "high", 3),
+            (Conversation.priority == "normal", 2),
+            (Conversation.priority == "low", 1),
+            else_=0,
+        )
+        items = query.order_by(prio_rank.desc(), Conversation.updated_at.desc(), Conversation.id.desc()).offset(offset).limit(limit).all()
+    elif sort_by == "priority_asc":
+        prio_rank = case(
+            (Conversation.priority == "urgent", 4),
+            (Conversation.priority == "high", 3),
+            (Conversation.priority == "normal", 2),
+            (Conversation.priority == "low", 1),
+            else_=0,
+        )
+        items = query.order_by(prio_rank.asc(), Conversation.updated_at.desc(), Conversation.id.desc()).offset(offset).limit(limit).all()
+    else:
+        items = query.order_by(Conversation.updated_at.desc(), Conversation.id.desc()).offset(offset).limit(limit).all()
     return items, int(total or 0)
+
+
+def check_and_bump_version(conversation: Conversation, expected_version: Optional[int] = None) -> None:
+    """Optimistic concurrency check. Raises 409 Conflict if another agent modified the conversation."""
+    current_v = getattr(conversation, "version", 1) or 1
+    if expected_version is not None and current_v != expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="This conversation was updated by another agent. Refreshing to latest state.",
+        )
+    conversation.version = current_v + 1
 
 
 ALLOWED_TRANSITIONS = {
@@ -331,8 +373,10 @@ def transition_status(
     conversation: Conversation,
     new_status: str,
     actor: User,
-    resolution_details: Optional[str] = None
+    resolution_details: Optional[str] = None,
+    expected_version: Optional[int] = None,
 ) -> Conversation:
+    check_and_bump_version(conversation, expected_version)
     current = conversation.status
     if current == new_status:
         if resolution_details is not None and new_status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
@@ -375,6 +419,24 @@ def transition_status(
             conversation.sla_resolution_breached = False
 
     record_system_event(db, conversation, f"Status changed from {current} to {new_status} by {actor.full_name}", actor_id=actor.id)
+
+    if new_status == ConversationStatus.PENDING and conversation.assigned_agent_id:
+        try:
+            from app.services.notification_service import create_notification
+            create_notification(
+                db,
+                user_id=conversation.assigned_agent_id,
+                type=NotificationType.CONVERSATION_PENDING,
+                priority=NotificationPriority.NORMAL,
+                title=f"Conversation Pending: {conversation.chat_id or f'#{conversation.id}'}",
+                message=f"Conversation {conversation.chat_id or f'#{conversation.id}'} was marked Pending.",
+                reference_type="conversation",
+                reference_id=conversation.id,
+                dedup_key=f"pending:{conversation.id}:{conversation.assigned_agent_id}",
+            )
+        except Exception:
+            pass
+
     return conversation
 
 
@@ -385,15 +447,38 @@ def update_conversation_properties(
     *,
     subject=None,
     priority=None,
-    tags=None
+    tags=None,
+    expected_version: Optional[int] = None,
 ) -> Conversation:
+    check_and_bump_version(conversation, expected_version)
     changed = []
     if subject is not None and subject != conversation.subject:
         conversation.subject = subject
         changed.append("subject")
     if priority is not None and priority != getattr(conversation, "priority", "normal"):
-        conversation.priority = priority
+        prio_norm = priority.lower().strip()
+        if prio_norm not in ("low", "normal", "high", "urgent"):
+            raise HTTPException(status_code=400, detail="Priority must be low, normal, high, or urgent")
+        conversation.priority = prio_norm
         changed.append("priority")
+        if prio_norm in ("high", "urgent"):
+            try:
+                from app.services.notification_service import create_notification
+                target_uid = conversation.assigned_agent_id
+                if target_uid and target_uid != actor.id:
+                    create_notification(
+                        db,
+                        user_id=target_uid,
+                        type=NotificationType.SYSTEM,
+                        priority=NotificationPriority.URGENT if prio_norm == "urgent" else NotificationPriority.HIGH,
+                        title=f"{prio_norm.capitalize()} Priority: {conversation.chat_id or f'#{conversation.id}'}",
+                        message=f"Conversation priority set to {prio_norm} by {actor.full_name}.",
+                        reference_type="conversation",
+                        reference_id=conversation.id,
+                        dedup_key=f"prio:{conversation.id}:{prio_norm}",
+                    )
+            except Exception:
+                pass
     if tags is not None:
         new_tags = ensure_tags(tags)
         if new_tags != getattr(conversation, "tags", []):
@@ -493,22 +578,27 @@ def assign_conversation(db: Session, conversation: Conversation, actor: User, ag
     }
     conversation.assignment_history = list(conversation.assignment_history or []) + [history_entry]
 
-    # Send notification to receiving agent if assigned by someone else
+    # Send notification to receiving agent if assigned or reassigned by someone else
     if agent.id != actor.id:
         try:
-            notif = Notification(
+            from app.services.notification_service import create_notification
+            is_reassign = old_agent_id is not None and old_agent_id != agent.id
+            notif_type = NotificationType.CONVERSATION_REASSIGNED if is_reassign else NotificationType.CONVERSATION_ASSIGNED
+            notif_title = "Conversation Reassigned" if is_reassign else "Conversation Assigned"
+            create_notification(
+                db,
                 user_id=agent.id,
-                type=NotificationType.CONVERSATION_ASSIGNED,
-                priority=NotificationPriority.NORMAL,
-                title="Conversation Assigned",
-                message=f"Conversation {conversation.chat_id or f'#{conversation.id}'} was assigned to you by {actor.full_name}" + (f": {note}" if note else ""),
+                type=notif_type,
+                priority=NotificationPriority.HIGH if conversation.priority in ("high", "urgent") else NotificationPriority.NORMAL,
+                title=notif_title,
+                message=f"Conversation {conversation.chat_id or f'#{conversation.id}'} was {'reassigned' if is_reassign else 'assigned'} to you by {actor.full_name}" + (f": {note}" if note else ""),
                 reference_type="conversation",
                 reference_id=conversation.id,
-                is_read=False,
+                dedup_key=f"assign:{conversation.id}:{agent.id}",
             )
-            db.add(notif)
         except Exception:
             pass
+    check_and_bump_version(conversation)
 
     if note:
         record_system_event(db, conversation, f"Assigned to {agent.full_name}: {note}", actor_id=actor.id)
@@ -535,16 +625,18 @@ def create_conversation(db: Session, data: ConversationCreate, customer: User) -
     return conversation
 
 
-def take_conversation(db: Session, conversation: Conversation, agent: User) -> Conversation:
+def take_conversation(db: Session, conversation: Conversation, agent: User, expected_version: Optional[int] = None) -> Conversation:
+    check_and_bump_version(conversation, expected_version)
     if conversation.assigned_agent_id and conversation.assigned_agent_id != agent.id:
-        raise HTTPException(status_code=409, detail="Conversation already assigned to another agent")
+        owner_name = conversation.assigned_agent.full_name if conversation.assigned_agent else "another agent"
+        raise HTTPException(status_code=409, detail=f"Conversation is already owned by {owner_name}")
 
-    if conversation.status not in (ConversationStatus.AI_HANDLING, ConversationStatus.PENDING):
-        raise HTTPException(status_code=409, detail="Conversation cannot be taken")
+    if conversation.status not in (ConversationStatus.AI_HANDLING, ConversationStatus.PENDING, ConversationStatus.OPEN):
+        raise HTTPException(status_code=409, detail="Conversation cannot be taken in its current state")
 
     profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent.id).first()
-    if profile and not profile.is_available:
-        raise HTTPException(status_code=400, detail="You are currently offline. Please set your status to Online before taking conversations.")
+    if profile and (profile.admin_forced_offline or profile.availability_status == "offline"):
+        raise HTTPException(status_code=400, detail="You are currently offline. Please set your status to Available or Busy before taking conversations.")
     if profile and profile.active_conversations >= profile.max_conversations:
         raise HTTPException(status_code=409, detail="Agent at capacity")
 
@@ -573,6 +665,7 @@ def add_message(
 
     conversation.updated_at = _utcnow()
     conversation.last_message_at = _utcnow()
+    check_and_bump_version(conversation)
 
     if not is_internal:
         if sender.role == "customer":
@@ -580,6 +673,25 @@ def add_message(
             # If conversation was waiting_on_customer, customer reply makes it eligible for handling again
             if conversation.status == ConversationStatus.WAITING_ON_CUSTOMER:
                 transition_status(db, conversation, ConversationStatus.OPEN.value, sender)
+            # Notify assigned agent of new customer reply (deduplicated)
+            if conversation.assigned_agent_id:
+                try:
+                    from app.services.notification_service import create_notification
+                    chat_ref = conversation.chat_id or f"#{conversation.id}"
+                    create_notification(
+                        db,
+                        user_id=conversation.assigned_agent_id,
+                        type=NotificationType.NEW_MESSAGE,
+                        priority=NotificationPriority.HIGH if conversation.priority in ("high", "urgent") else NotificationPriority.NORMAL,
+                        title=f"New customer reply in {chat_ref}",
+                        message=f"{sender.full_name}: {content[:120]}",
+                        reference_type="conversation",
+                        reference_id=conversation.id,
+                        dedup_key=f"cust_reply:{conversation.id}:{conversation.assigned_agent_id}",
+                        dedup_window_minutes=2,
+                    )
+                except Exception:
+                    pass
         else:
             conversation.agent_last_read_at = _utcnow()
 
@@ -757,6 +869,7 @@ def build_conversation_list_item(db: Session, conversation: Conversation, viewer
         "unread_count": unread,
         "user_last_read_at": user_read_at,
         "merged_into_id": getattr(conversation, "merged_into_id", None),
+        "version": getattr(conversation, "version", 1) or 1,
     }
 
 

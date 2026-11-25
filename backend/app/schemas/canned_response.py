@@ -9,6 +9,7 @@ class CannedResponseBase(BaseModel):
     category: str = "general"
     shortcut: Optional[str] = None
     is_active: bool = True
+    is_shared: bool = True
 
 
 class CannedResponseCreate(CannedResponseBase):
@@ -21,6 +22,7 @@ class CannedResponseUpdate(BaseModel):
     category: Optional[str] = None
     shortcut: Optional[str] = None
     is_active: Optional[bool] = None
+    is_shared: Optional[bool] = None
 
 
 class CannedResponseResponse(CannedResponseBase):

@@ -3,12 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { adminApi, authApi } from '@/lib/api';
+import { adminApi, authApi, tagApi } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/Input';
 import { Badge } from '@/components/Badge';
-import type { SettingResponse } from '@/lib/types';
+import type { SettingResponse, TagItem } from '@/lib/types';
 import {
   getNotificationPreferences,
   saveNotificationPreferences,
@@ -37,6 +37,40 @@ export default function SettingsPage() {
   const [notifPrefs, setNotifPrefs] = useState<DesktopNotificationPreferences>(getNotificationPreferences);
   const [notifPermission, setNotifPermission] = useState<string>('default');
   const [notifTestSent, setNotifTestSent] = useState(false);
+
+  // Configurable Conversation Tags
+  const [tagsList, setTagsList] = useState<TagItem[]>([]);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#3b82f6');
+  const [tagSaving, setTagSaving] = useState(false);
+
+  useEffect(() => {
+    tagApi.list().then(setTagsList).catch(() => {});
+  }, []);
+
+  const handleCreateTag = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTagName.trim()) return;
+    setTagSaving(true);
+    try {
+      const created = await tagApi.create({ name: newTagName.trim(), color: newTagColor, is_active: true });
+      setTagsList((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewTagName('');
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create tag' });
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  const handleDeleteTag = async (id: number) => {
+    try {
+      await tagApi.delete(id);
+      setTagsList((prev) => prev.filter((t) => t.id !== id));
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete tag' });
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -100,12 +134,15 @@ export default function SettingsPage() {
 
     setPwdLoading(true);
     try {
-      await authApi.changePassword({
+      const res = await authApi.changePassword({
         current_password: currentPassword,
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
-      setPwdSuccess('Password changed successfully');
+      if (res.access_token && typeof window !== 'undefined') {
+        localStorage.setItem('access_token', res.access_token);
+      }
+      setPwdSuccess('Password changed successfully. Other sessions have been signed out.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -439,6 +476,55 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Configurable Conversation Tags */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Conversation Tags</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Configure the tags available to agents in the conversation workspace.
+          </p>
+          <form onSubmit={handleCreateTag} className="flex flex-wrap items-center gap-2">
+            <Input
+              value={newTagName}
+              onChange={(e) => setNewTagName(e.target.value)}
+              placeholder="New tag name (e.g. Payment, VIP)"
+              className="max-w-xs"
+            />
+            <input
+              type="color"
+              value={newTagColor}
+              onChange={(e) => setNewTagColor(e.target.value)}
+              aria-label="Tag color"
+              className="h-9 w-10 rounded border border-slate-300 dark:border-slate-700 bg-transparent cursor-pointer"
+            />
+            <Button type="submit" variant="primary" size="sm" disabled={tagSaving || !newTagName.trim()}>
+              {tagSaving ? 'Adding...' : 'Add Tag'}
+            </Button>
+          </form>
+          <div className="flex flex-wrap gap-2">
+            {tagsList.map((tag) => (
+              <span
+                key={tag.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1 text-xs font-medium text-slate-700 dark:text-slate-200"
+              >
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                {tag.name}
+                <button
+                  type="button"
+                  onClick={() => handleDeleteTag(tag.id)}
+                  aria-label={`Remove ${tag.name}`}
+                  className="ml-1 text-slate-400 hover:text-red-500 font-bold"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="flex justify-end">
         <Button variant="primary" onClick={handleSave} disabled={isSaving}>

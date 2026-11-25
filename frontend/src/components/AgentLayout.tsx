@@ -25,24 +25,47 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
   const [globalSearch, setGlobalSearch] = useState('');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [isAvailable, setIsAvailable] = useState<boolean>(user?.agent_profile?.is_available ?? false);
+  const [availabilityStatus, setAvailabilityStatus] = useState<'available' | 'busy' | 'offline'>(
+    user?.agent_profile?.admin_forced_offline
+      ? 'offline'
+      : (user?.agent_profile?.availability_status || (user?.agent_profile?.is_available ? 'available' : 'offline'))
+  );
+  const [adminForcedOffline, setAdminForcedOffline] = useState<boolean>(user?.agent_profile?.admin_forced_offline ?? false);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
 
   useEffect(() => {
-    if (user?.agent_profile?.is_available !== undefined) {
+    if (user?.agent_profile) {
       setIsAvailable(user.agent_profile.is_available);
+      setAdminForcedOffline(Boolean(user.agent_profile.admin_forced_offline));
+      setAvailabilityStatus(
+        user.agent_profile.admin_forced_offline
+          ? 'offline'
+          : (user.agent_profile.availability_status || (user.agent_profile.is_available ? 'available' : 'offline'))
+      );
     }
-  }, [user?.agent_profile?.is_available]);
+  }, [user?.agent_profile]);
 
-  const handleAvailabilityToggle = async () => {
-    if (user?.role !== 'agent' || availabilityLoading) return;
-    const next = !isAvailable;
+  const handleAvailabilityChange = async (nextStatus: 'available' | 'busy' | 'offline') => {
+    if (user?.role !== 'agent' || availabilityLoading || adminForcedOffline) return;
+    const prevStatus = availabilityStatus;
     setAvailabilityLoading(true);
-    setIsAvailable(next);
+    setAvailabilityStatus(nextStatus);
+    setIsAvailable(nextStatus === 'available');
     try {
-      await agentApi.setAvailability(next);
+      const res = await agentApi.setAvailability(nextStatus === 'available', nextStatus, nextStatus === 'busy');
+      if (res.effective_status) {
+        setAvailabilityStatus(res.effective_status as 'available' | 'busy' | 'offline');
+      }
+      if (res.admin_forced_offline !== undefined) {
+        setAdminForcedOffline(res.admin_forced_offline);
+      }
+      if (res.is_available !== undefined) {
+        setIsAvailable(res.is_available);
+      }
     } catch (err) {
-      setIsAvailable(!next);
-      console.error('Failed to toggle availability:', err);
+      setAvailabilityStatus(prevStatus);
+      setIsAvailable(prevStatus === 'available');
+      console.error('Failed to update availability:', err);
     } finally {
       setAvailabilityLoading(false);
     }
@@ -179,21 +202,39 @@ export function AgentLayout({ children, fullScreen = false }: AgentLayoutProps) 
             </div>
             <div className="flex items-center gap-2 lg:gap-3">
               {user?.role === 'agent' && (
-                <button
-                  type="button"
-                  onClick={handleAvailabilityToggle}
-                  disabled={availabilityLoading}
-                  className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    isAvailable
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800'
-                      : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700'
-                  } ${availabilityLoading ? 'opacity-60 cursor-wait' : 'hover:brightness-[0.98]'}`}
-                  aria-pressed={isAvailable}
-                  aria-label={isAvailable ? 'Online, click to go offline' : 'Offline, click to go online'}
-                >
-                  <span className={`w-2.5 h-2.5 rounded-full ${isAvailable ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                  <span>{isAvailable ? 'Online' : 'Offline'}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex items-center gap-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-xs font-medium">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        availabilityStatus === 'available'
+                          ? 'bg-emerald-500'
+                          : availabilityStatus === 'busy'
+                          ? 'bg-amber-500'
+                          : 'bg-slate-400'
+                      }`}
+                    />
+                    <select
+                      aria-label="Agent availability status"
+                      value={availabilityStatus}
+                      disabled={availabilityLoading || adminForcedOffline}
+                      onChange={(e) => handleAvailabilityChange(e.target.value as 'available' | 'busy' | 'offline')}
+                      title={adminForcedOffline ? 'Offline enforced by administrator' : 'Change availability (Busy pauses auto-assignment)'}
+                      className="bg-transparent text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <option value="available">Available</option>
+                      <option value="busy">Busy (Paused)</option>
+                      <option value="offline">{adminForcedOffline ? 'Offline (Admin Locked)' : 'Offline'}</option>
+                    </select>
+                  </div>
+                  {user.agent_profile && (
+                    <span
+                      title="Active conversations / Maximum capacity"
+                      className="hidden sm:inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-600 dark:text-slate-300"
+                    >
+                      {user.agent_profile.active_conversations}/{user.agent_profile.max_conversations}
+                    </span>
+                  )}
+                </div>
               )}
               <NotificationBell />
               <div className="relative">

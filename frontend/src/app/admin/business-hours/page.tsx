@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
-import { businessHoursApi } from "@/lib/api";
+import { adminApi, businessHoursApi } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
@@ -50,6 +50,10 @@ export default function BusinessHoursPage() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const [filterActive, setFilterActive] = useState<string>("all");
+  const [bhTimezone, setBhTimezone] = useState("UTC");
+  const [outOfHoursMsg, setOutOfHoursMsg] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -77,6 +81,16 @@ export default function BusinessHoursPage() {
 
       const status = await businessHoursApi.checkOpen();
       setOpenStatus(status);
+
+      try {
+        const bhSettings = await adminApi.getSettings("business_hours");
+        const tz = bhSettings.find((s) => s.key === "timezone")?.value;
+        const msg = bhSettings.find((s) => s.key === "out_of_hours_message")?.value;
+        if (tz) setBhTimezone(String(tz));
+        if (msg) setOutOfHoursMsg(String(msg));
+      } catch {
+        // Fallback to status values
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data");
     } finally {
@@ -237,6 +251,67 @@ export default function BusinessHoursPage() {
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">{error}</div>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Timezone & Out-of-Hours Response</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Operating Timezone (IANA)</label>
+              <select
+                value={bhTimezone}
+                onChange={(e) => setBhTimezone(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              >
+                <option value="UTC">UTC</option>
+                <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                <option value="America/New_York">America/New_York (EST/EDT)</option>
+                <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+                <option value="Europe/London">Europe/London (GMT/BST)</option>
+                <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Custom Out-of-Hours Customer Message</label>
+              <Input
+                value={outOfHoursMsg}
+                onChange={(e) => setOutOfHoursMsg(e.target.value)}
+                placeholder="We are currently outside business hours..."
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={savingConfig}
+              onClick={async () => {
+                setSavingConfig(true);
+                setConfigSaved(false);
+                try {
+                  await adminApi.bulkUpdateSettings("business_hours", {
+                    timezone: bhTimezone,
+                    out_of_hours_message: outOfHoursMsg,
+                  });
+                  setConfigSaved(true);
+                  const st = await businessHoursApi.checkOpen();
+                  setOpenStatus(st);
+                  setTimeout(() => setConfigSaved(false), 3000);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Failed to save settings");
+                } finally {
+                  setSavingConfig(false);
+                }
+              }}
+            >
+              {savingConfig ? "Saving..." : "Save Schedule Settings"}
+            </Button>
+            {configSaved && <span className="text-xs text-emerald-600 font-medium">Saved!</span>}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="flex flex-wrap gap-4 mb-4">
         <select

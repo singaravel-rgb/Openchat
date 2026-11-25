@@ -252,6 +252,9 @@ def list_agents(
             )
             .count()
         )
+        eff = "offline" if (profile and profile.admin_forced_offline) else (profile.availability_status if profile else "offline")
+        if eff == "available" and profile and profile.pause_auto_assignment:
+            eff = "busy"
         result.append({
             "id": agent.id,
             "email": agent.email,
@@ -259,6 +262,10 @@ def list_agents(
             "is_active": agent.is_active,
             "is_approved": profile.is_approved if profile else False,
             "is_available": profile.is_available if profile else False,
+            "availability_status": profile.availability_status if profile else "offline",
+            "effective_status": eff,
+            "admin_forced_offline": profile.admin_forced_offline if profile else False,
+            "pause_auto_assignment": profile.pause_auto_assignment if profile else False,
             "max_conversations": profile.max_conversations if profile else 5,
             "active_conversations": active_count,
             "capacity_remaining": max(0, (profile.max_conversations if profile else 5) - active_count),
@@ -312,21 +319,31 @@ def create_agent(
 @router.patch("/agents/{agent_id}/availability")
 def set_agent_availability_admin(
     agent_id: int,
-    is_available: bool,
+    is_available: Optional[bool] = Query(None),
+    availability_status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
     agent = db.query(User).filter(User.id == agent_id, User.role == "agent").first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    profile = agent.agent_profile
-    if not profile:
-        profile = AgentProfile(user_id=agent.id, is_available=is_available)
-        db.add(profile)
-    else:
-        profile.is_available = is_available
-    db.commit()
-    return {"message": f"Agent {agent.full_name} availability set to {'available' if is_available else 'unavailable'}"}
+    if not agent.agent_profile:
+        db.add(AgentProfile(user_id=agent.id, is_approved=True))
+        db.commit()
+    from app.services.assignment_service import set_agent_availability
+    profile = set_agent_availability(
+        db,
+        agent.id,
+        is_available=is_available,
+        availability_status=availability_status,
+        by_admin=True,
+    )
+    return {
+        "message": f"Agent {agent.full_name} availability updated to {profile.availability_status if profile else 'offline'}",
+        "availability_status": profile.availability_status if profile else "offline",
+        "admin_forced_offline": profile.admin_forced_offline if profile else False,
+        "is_available": profile.is_available if profile else False,
+    }
 
 
 @router.patch("/agents/{agent_id}/max-conversations")
@@ -427,6 +444,9 @@ def list_all_conversations_admin(
     customer_id: Optional[int] = Query(None),
     handling: Optional[str] = Query(None),
     filter_type: Optional[str] = Query(None, alias="filter"),
+    priority: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     limit: int = Query(50, le=200, ge=1),
     offset: int = Query(0, ge=0),
@@ -441,6 +461,9 @@ def list_all_conversations_admin(
         customer_id=customer_id,
         handling=handling,
         filter_type=filter_type,
+        priority=priority,
+        tag=tag,
+        sort_by=sort_by,
         q=q,
         limit=limit,
         offset=offset,
@@ -501,6 +524,7 @@ def get_conversation_admin(
         last_message_at=item.get("last_message_at"),
         unread_count=item.get("unread_count", 0),
         merged_into_id=getattr(conversation, "merged_into_id", None),
+        version=getattr(conversation, "version", 1) or 1,
         linked_conversations=[
             ConversationLinkItem.model_validate(l)
             for l in get_linked_conversations_for_conversation(db, conversation.id)
@@ -544,7 +568,15 @@ def update_conversation_admin(
     conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    update_conversation_properties(db, conversation, current_user, subject=data.subject, priority=data.priority, tags=data.tags)
+    update_conversation_properties(
+        db,
+        conversation,
+        current_user,
+        subject=data.subject,
+        priority=data.priority,
+        tags=data.tags,
+        expected_version=data.expected_version,
+    )
     db.commit()
     db.refresh(conversation)
     return {"message": "Conversation updated"}

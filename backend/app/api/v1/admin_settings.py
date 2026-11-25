@@ -61,6 +61,13 @@ DEFAULT_SETTINGS = {
         "unassigned_alert_threshold_seconds": {"value": 10, "description": "Alert admins if unassigned in pending queue (seconds)"},
         "auto_escalate_enabled": {"value": True, "description": "Enable automated reassignment on missed deadline"},
     },
+    "business_hours": {
+        "timezone": {"value": "UTC", "description": "Support operating timezone (IANA e.g. Asia/Kolkata, America/New_York, UTC)"},
+        "out_of_hours_message": {
+            "value": "We are currently outside our business hours. Your conversation has been queued and our support team will respond during our next working period.",
+            "description": "Custom message shown to customers outside business hours",
+        },
+    },
 }
 
 

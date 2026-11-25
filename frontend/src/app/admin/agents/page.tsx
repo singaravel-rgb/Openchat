@@ -39,11 +39,21 @@ export default function AdminAgentsPage() {
     fetchAgents();
   }, []);
 
-  const handleToggleAvailability = async (agent: AdminAgent) => {
+  const handleSetAvailability = async (agent: AdminAgent, nextStatus: 'available' | 'busy' | 'offline') => {
     try {
-      await adminApi.setAgentAvailability(agent.id, !agent.is_available);
+      const res = await adminApi.setAgentAvailability(agent.id, nextStatus === 'available', nextStatus);
       setAgents((prev) =>
-        prev.map((a) => (a.id === agent.id ? { ...a, is_available: !agent.is_available } : a))
+        prev.map((a) =>
+          a.id === agent.id
+            ? {
+                ...a,
+                is_available: res.is_available ?? (nextStatus === 'available'),
+                availability_status: nextStatus,
+                effective_status: nextStatus,
+                admin_forced_offline: res.admin_forced_offline ?? (nextStatus === 'offline'),
+              }
+            : a
+        )
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update availability');
@@ -176,9 +186,20 @@ export default function AdminAgentsPage() {
                       </td>
                       <td className="py-4">
                         <div className="flex items-center gap-2">
-                          <Badge variant={agent.is_available ? 'success' : 'default'}>
-                            {agent.is_available ? 'Available' : 'Unavailable'}
-                          </Badge>
+                          {(() => {
+                            const eff = agent.effective_status || (agent.is_available ? 'available' : 'offline');
+                            return (
+                              <Badge variant={eff === 'available' ? 'success' : eff === 'busy' ? 'warning' : 'default'}>
+                                {eff === 'available'
+                                  ? 'Available'
+                                  : eff === 'busy'
+                                  ? 'Busy'
+                                  : agent.admin_forced_offline
+                                  ? 'Offline (Admin Locked)'
+                                  : 'Offline'}
+                              </Badge>
+                            );
+                          })()}
                           <Badge variant={agent.is_active ? 'primary' : 'default'}>
                             {agent.is_active ? 'Active' : 'Inactive'}
                           </Badge>
@@ -206,14 +227,16 @@ export default function AdminAgentsPage() {
                       </td>
                       <td className="py-4">
                         <div className="flex items-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleToggleAvailability(agent)}
-                            className={agent.is_available ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-600 hover:bg-slate-100'}
+                          <select
+                            aria-label={`Set availability for ${agent.full_name}`}
+                            value={agent.availability_status || (agent.is_available ? 'available' : 'offline')}
+                            onChange={(e) => handleSetAvailability(agent, e.target.value as 'available' | 'busy' | 'offline')}
+                            className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200"
                           >
-                            {agent.is_available ? 'Mark Unavailable' : 'Mark Available'}
-                          </Button>
+                            <option value="available">Available</option>
+                            <option value="busy">Busy</option>
+                            <option value="offline">Force Offline</option>
+                          </select>
                           <Button variant="outline" size="sm" onClick={() => handleEditMaxConversations(agent)}>
                             Max: {agent.max_conversations}
                           </Button>

@@ -22,6 +22,9 @@ class AgentProfileSummary(BaseModel):
 
     is_available: bool = False
     is_approved: bool = False
+    availability_status: str = "available"
+    admin_forced_offline: bool = False
+    pause_auto_assignment: bool = False
     max_conversations: int = 5
     active_conversations: int = 0
 
@@ -66,6 +69,7 @@ class PasswordResetValidateResponse(BaseModel):
 
 class GenericMessageResponse(BaseModel):
     message: str
+    access_token: Optional[str] = None
 
 
 class AdminPasswordResetResponse(BaseModel):

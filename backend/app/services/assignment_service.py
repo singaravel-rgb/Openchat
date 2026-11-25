@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -20,6 +21,9 @@ def get_available_agents(db: Session) -> list[User]:
             User.role == "agent",
             User.is_active == True,  # noqa: E712
             AgentProfile.is_available == True,  # noqa: E712
+            AgentProfile.availability_status == "available",
+            AgentProfile.admin_forced_offline == False,  # noqa: E712
+            AgentProfile.pause_auto_assignment == False,  # noqa: E712
         )
         .all()
     )
@@ -214,39 +218,102 @@ def reassign_conversation(db: Session, conversation: Conversation, new_agent_id:
     return assign_conversation_to_agent(db, conversation)
 
 
-def set_agent_availability(db: Session, agent_id: int, is_available: bool) -> bool:
-    """Set agent availability and process pending queue if becoming available."""
+def set_agent_availability(
+    db: Session,
+    agent_id: int,
+    is_available: bool | None = None,
+    availability_status: str | None = None,
+    pause_auto_assignment: bool | None = None,
+    by_admin: bool = False,
+) -> AgentProfile | None:
+    """
+    Set agent availability (available | busy | offline) and/or pause_auto_assignment.
+    Enforces admin_forced_offline so agents cannot override an administrator-enforced Offline state.
+    Processes pending/open queue if becoming available.
+    """
     agent_profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent_id).first()
     if not agent_profile:
-        return False
+        return None
 
-    agent_profile.is_available = is_available
+    if not by_admin and agent_profile.admin_forced_offline:
+        if (availability_status and availability_status != "offline") or is_available is True:
+            raise HTTPException(
+                status_code=403,
+                detail="Your availability has been set to Offline by an administrator and cannot be overridden.",
+            )
+
+    if availability_status is not None:
+        status_norm = availability_status.lower().strip()
+        if status_norm not in ("available", "busy", "offline"):
+            raise HTTPException(status_code=400, detail="availability_status must be 'available', 'busy', or 'offline'")
+        agent_profile.availability_status = status_norm
+        if status_norm == "available" and pause_auto_assignment is None:
+            agent_profile.pause_auto_assignment = False
+    elif is_available is not None:
+        agent_profile.availability_status = "available" if is_available else "offline"
+        if is_available and pause_auto_assignment is None:
+            agent_profile.pause_auto_assignment = False
+
+    if pause_auto_assignment is not None:
+        agent_profile.pause_auto_assignment = pause_auto_assignment
+
+    if by_admin:
+        if agent_profile.availability_status == "offline":
+            agent_profile.admin_forced_offline = True
+        else:
+            agent_profile.admin_forced_offline = False
+
+    # Effective auto-assignment eligibility
+    effective_available = (
+        agent_profile.availability_status == "available"
+        and not agent_profile.pause_auto_assignment
+        and not agent_profile.admin_forced_offline
+    )
+    agent_profile.is_available = effective_available
     db.commit()
+    db.refresh(agent_profile)
 
-    if is_available:
+    if effective_available:
         process_pending_queue(db)
 
-    return True
+    return agent_profile
 
 
 def get_agent_workload(db: Session, agent_id: int) -> dict:
-    """Get current workload statistics for an agent."""
+    """Get current workload and availability statistics for an agent."""
     agent_profile = db.query(AgentProfile).filter(AgentProfile.user_id == agent_id).first()
     if not agent_profile:
-        return {"active": 0, "max": 5, "available": False, "capacity_remaining": 0}
+        return {
+            "active": 0,
+            "max": 5,
+            "available": False,
+            "availability_status": "offline",
+            "effective_status": "offline",
+            "admin_forced_offline": False,
+            "pause_auto_assignment": False,
+            "capacity_remaining": 0,
+        }
 
     active_conversations = (
         db.query(Conversation)
         .filter(
             Conversation.assigned_agent_id == agent_id,
-            Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.AI_HANDLING]),
+            Conversation.status.in_([ConversationStatus.ASSIGNED, ConversationStatus.OPEN, ConversationStatus.PENDING]),
         )
         .count()
     )
+
+    eff = "offline" if agent_profile.admin_forced_offline else agent_profile.availability_status
+    if eff == "available" and agent_profile.pause_auto_assignment:
+        eff = "busy"
 
     return {
         "active": active_conversations,
         "max": agent_profile.max_conversations,
         "available": agent_profile.is_available,
+        "availability_status": agent_profile.availability_status,
+        "effective_status": eff,
+        "admin_forced_offline": agent_profile.admin_forced_offline,
+        "pause_auto_assignment": agent_profile.pause_auto_assignment,
         "capacity_remaining": max(0, agent_profile.max_conversations - active_conversations),
     }

@@ -65,6 +65,9 @@ class WidgetPublicConfig(BaseModel):
     show_agent_avatar: bool
     require_email: bool
     bot_flow: Optional[dict] = None
+    is_business_open: bool = True
+    out_of_hours_message: Optional[str] = None
+    business_timezone: str = "UTC"
 
 
 class WidgetSessionCreate(BaseModel):
@@ -122,6 +125,7 @@ class WidgetConversation(BaseModel):
     created_at: datetime
     last_message: Optional[str] = None
     unread_count: int = 0
+    agent_last_read_at: Optional[datetime] = None
 
 
 class WidgetConversationDetail(WidgetConversation):

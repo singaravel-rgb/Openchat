@@ -10,7 +10,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, oauth2_scheme
 from app.core.redis import redis_client
 from app.core.security import (
     create_access_token,
@@ -357,7 +357,8 @@ def forgot_password(
         # In production/staging, email_service delivers the reset link.
         # Fallback logging for auditability:
         from app.services.email_service import send_email
-        reset_link = f"/reset-password?token={raw_token}"
+        base_url = str(request.base_url).rstrip("/")
+        reset_link = f"{base_url}/reset-password?token={raw_token}"
         try:
             send_email(
                 to_email=user.email,
@@ -448,9 +449,16 @@ def reset_password(
             detail="Account is inactive or not found.",
         )
 
-    # Invalidate token
+    # Invalidate token & revoke prior sessions
     record.used_at = now
     user.password_hash = hash_password(payload.password)
+    user.password_changed_at = now
+
+    try:
+        if redis_client:
+            redis_client.set(f"revoked_user:{user.id}", str(time.time()), ex=86400 * 7)
+    except Exception:
+        pass
 
     # Clear any lockout keys in Redis for this user
     try:
@@ -506,7 +514,9 @@ def change_password(
 
     validate_password_strength(payload.new_password)
 
+    now = datetime.now(timezone.utc)
     current_user.password_hash = hash_password(payload.new_password)
+    current_user.password_changed_at = now
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -518,6 +528,45 @@ def change_password(
     db.add(audit)
     db.commit()
 
+    # Invalidate all prior sessions while issuing a fresh token for the current session
+    try:
+        if redis_client:
+            redis_client.set(f"revoked_user:{current_user.id}", str(now.timestamp()), ex=86400 * 7)
+    except Exception:
+        pass
+
+    fresh_token = create_access_token(str(current_user.id), role=current_user.role)
     return {
         "message": "Password changed successfully.",
+        "access_token": fresh_token,
     }
+
+
+@router.post("/logout", response_model=GenericMessageResponse)
+def logout(
+    token: str = Depends(oauth2_scheme),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Securely revoke the current access token on logout."""
+    try:
+        if redis_client and token:
+            token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            redis_client.set(f"revoked_token:{token_hash}", "1", ex=86400 * 7)
+    except Exception:
+        pass
+
+    try:
+        audit = AuditLog(
+            user_id=current_user.id,
+            action="auth.logout",
+            resource_type="user",
+            resource_id=current_user.id,
+            details=json.dumps({"email": current_user.email}),
+        )
+        db.add(audit)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return {"message": "Logged out successfully."}

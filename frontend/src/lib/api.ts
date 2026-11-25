@@ -159,9 +159,14 @@ export const authApi = {
     }),
 
   changePassword: (data: { current_password: string; new_password: string; confirm_password: string }) =>
-    fetchApi<{ message: string }>('/auth/change-password', {
+    fetchApi<{ message: string; access_token?: string }>('/auth/change-password', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  logout: () =>
+    fetchApi<{ message: string }>('/auth/logout', {
+      method: 'POST',
     }),
 };
 
@@ -224,12 +229,15 @@ export const conversationApi = {
 };
 
 export const agentApi = {
-  listConversations: (queue?: string, status?: string, q?: string, handling?: string, filter?: string) => {
+  listConversations: (queue?: string, status?: string, q?: string, handling?: string, filter?: string, priority?: string, tag?: string, sort_by?: string) => {
     const params = new URLSearchParams();
     if (queue) params.append('queue', queue);
     if (status) params.append('status', status);
     if (handling) params.append('handling', handling);
     if (filter) params.append('filter', filter);
+    if (priority) params.append('priority', priority);
+    if (tag) params.append('tag', tag);
+    if (sort_by) params.append('sort_by', sort_by);
     if (q) params.append('q', q);
     return fetchApi<ConversationListItem[]>(`/agent/conversations?${params}`);
   },
@@ -286,10 +294,15 @@ export const agentApi = {
       body: JSON.stringify(data),
     }),
 
-  setAvailability: (isAvailable: boolean) =>
-    fetchApi<{ message: string }>(`/agent/availability?is_available=${isAvailable}`, {
+  setAvailability: (isAvailable?: boolean, availabilityStatus?: string, pauseAutoAssignment?: boolean) => {
+    const params = new URLSearchParams();
+    if (isAvailable !== undefined) params.append('is_available', String(isAvailable));
+    if (availabilityStatus) params.append('availability_status', availabilityStatus);
+    if (pauseAutoAssignment !== undefined) params.append('pause_auto_assignment', String(pauseAutoAssignment));
+    return fetchApi<{ message: string; availability_status?: string; effective_status?: string; admin_forced_offline?: boolean; pause_auto_assignment?: boolean; is_available?: boolean }>(`/agent/availability?${params}`, {
       method: 'PATCH',
-    }),
+    });
+  },
 
   listAgents: () => fetchApi<Array<{ id: number; full_name: string; email: string }>>('/agent/agents'),
 
@@ -460,23 +473,30 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
 
-  setAgentAvailability: (agentId: number, isAvailable: boolean) =>
-    fetchApi<{ message: string }>(`/admin/agents/${agentId}/availability?is_available=${isAvailable}`, {
+  setAgentAvailability: (agentId: number, isAvailable?: boolean, availabilityStatus?: string) => {
+    const params = new URLSearchParams();
+    if (isAvailable !== undefined) params.append('is_available', String(isAvailable));
+    if (availabilityStatus) params.append('availability_status', availabilityStatus);
+    return fetchApi<{ message: string; availability_status?: string; admin_forced_offline?: boolean; is_available?: boolean }>(`/admin/agents/${agentId}/availability?${params}`, {
       method: 'PATCH',
-    }),
+    });
+  },
 
   setAgentMaxConversations: (agentId: number, maxConversations: number) =>
     fetchApi<{ message: string }>(`/admin/agents/${agentId}/max-conversations?max_conversations=${maxConversations}`, {
       method: 'PATCH',
     }),
 
-  listConversations: (params?: { status?: string; agent_id?: number; customer_id?: number; handling?: string; filter?: string; q?: string; limit?: number; offset?: number }) => {
+  listConversations: (params?: { status?: string; agent_id?: number; customer_id?: number; handling?: string; filter?: string; priority?: string; tag?: string; sort_by?: string; q?: string; limit?: number; offset?: number }) => {
     const searchParams = new URLSearchParams();
     if (params?.status) searchParams.append('status', params.status);
     if (params?.agent_id) searchParams.append('agent_id', params.agent_id.toString());
     if (params?.customer_id) searchParams.append('customer_id', params.customer_id.toString());
     if (params?.handling) searchParams.append('handling', params.handling);
     if (params?.filter) searchParams.append('filter', params.filter);
+    if (params?.priority) searchParams.append('priority', params.priority);
+    if (params?.tag) searchParams.append('tag', params.tag);
+    if (params?.sort_by) searchParams.append('sort_by', params.sort_by);
     if (params?.q) searchParams.append('q', params.q);
     if (params?.limit) searchParams.append('limit', params.limit.toString());
     if (params?.offset) searchParams.append('offset', params.offset.toString());
@@ -798,6 +818,34 @@ export const notificationApi = {
     fetchApi<{ message: string }>('/notifications/mark-all-read', {
       method: 'POST',
     }),
+
+  getPreferences: () =>
+    fetchApi<import('./types').NotificationPreferences>('/notifications/preferences'),
+
+  updatePreferences: (prefs: import('./types').NotificationPreferences) =>
+    fetchApi<import('./types').NotificationPreferences>('/notifications/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(prefs),
+    }),
+};
+
+export const tagApi = {
+  list: (isActive?: boolean) => {
+    const p = isActive !== undefined ? `?is_active=${isActive}` : '';
+    return fetchApi<import('./types').TagItem[]>(`/tags${p}`);
+  },
+  create: (data: { name: string; color?: string; description?: string; is_active?: boolean }) =>
+    fetchApi<import('./types').TagItem>('/tags', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: { name?: string; color?: string; description?: string; is_active?: boolean }) =>
+    fetchApi<import('./types').TagItem>(`/tags/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: number) =>
+    fetchApi<void>(`/tags/${id}`, { method: 'DELETE' }),
 };
 
 export const attachmentApi = {
@@ -829,10 +877,11 @@ export const attachmentApi = {
 };
 
 export const cannedResponseApi = {
-  list: (params?: { category?: string; is_active?: boolean }) => {
+  list: (params?: { category?: string; is_active?: boolean; q?: string }) => {
     const searchParams = new URLSearchParams();
     if (params?.category) searchParams.append('category', params.category);
     if (params?.is_active !== undefined) searchParams.append('is_active', params.is_active.toString());
+    if (params?.q) searchParams.append('q', params.q);
     return fetchApi<CannedResponse[]>(`/canned-responses?${searchParams}`);
   },
 

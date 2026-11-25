@@ -8,7 +8,7 @@ import { Badge } from '@/components/Badge';
 import { Avatar } from '@/components/Avatar';
 import { format, formatDistanceToNow, isValid, parseISO } from 'date-fns';
 import type { ConversationListItem, Message, CannedResponse, Attachment, ConversationCustomFieldValue, GlobalNoteResponse, ConversationLinkItem } from '@/lib/types';
-import { conversationApi, agentApi, attachmentApi, adminApi, cannedResponseApi } from '@/lib/api';
+import { conversationApi, agentApi, attachmentApi, adminApi, cannedResponseApi, tagApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 const QUEUE_OPTIONS = [
@@ -196,7 +196,14 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'subject'>('newest');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'subject' | 'priority_desc' | 'priority_asc'>('newest');
+  const [priorityFilter, setPriorityFilter] = useState<string>('');
+  const [tagFilter, setTagFilter] = useState<string>('');
+  const [availableTags, setAvailableTags] = useState<import('@/lib/types').TagItem[]>([]);
+
+  useEffect(() => {
+    tagApi.list(true).then(setAvailableTags).catch(() => {});
+  }, []);
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
   const [showContactDetails, setShowContactDetails] = useState(false);
@@ -950,7 +957,8 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
         content: messageInput,
         is_internal: sentIsInternal,
         client_message_id: clientId,
-      });
+        expected_version: selectedConversation.version,
+      } as any);
       setMessages(prev => [...prev, newMsg]);
       setMessageInput('');
       setIsInternal(false);
@@ -963,7 +971,12 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       await loadConversation(selectedConversation.id);
       await loadConversations();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      const msg = err instanceof Error ? err.message : 'Failed to send message';
+      setError(msg);
+      if (msg.toLowerCase().includes('another agent') || msg.toLowerCase().includes('owned by')) {
+        await loadConversation(selectedConversation.id);
+        await loadConversations();
+      }
     } finally {
       setIsSending(false);
     }
@@ -1217,10 +1230,23 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       if (queueFilter === 'on_hold') return c.status === 'on_hold';
       if (queueFilter === 'ai') return c.status === 'ai_handling';
       return true;
+    }).filter(c => {
+      if (priorityFilter && (c.priority || 'normal').toLowerCase() !== priorityFilter) return false;
+      if (tagFilter && !(c.tags || []).some(t => t.toLowerCase() === tagFilter.toLowerCase())) return false;
+      return true;
     });
     const sorted = [...filtered];
     const timeOf = (c: ConversationListItem) => new Date(c.last_message_at || c.updated_at).getTime();
+    const prioRank: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
     sorted.sort((a, b) => {
+      if (sortBy === 'priority_desc') {
+        const diff = (prioRank[(b.priority || 'normal').toLowerCase()] || 0) - (prioRank[(a.priority || 'normal').toLowerCase()] || 0);
+        return diff !== 0 ? diff : timeOf(b) - timeOf(a);
+      }
+      if (sortBy === 'priority_asc') {
+        const diff = (prioRank[(a.priority || 'normal').toLowerCase()] || 0) - (prioRank[(b.priority || 'normal').toLowerCase()] || 0);
+        return diff !== 0 ? diff : timeOf(b) - timeOf(a);
+      }
       if (sortBy === 'subject') {
         return (a.subject || '').localeCompare(b.subject || '');
       }
@@ -1230,7 +1256,7 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
       return timeOf(b) - timeOf(a);
     });
     return sorted;
-  }, [conversations, searchTerm, adminFilters.q, adminFilters.status, adminFilters.agent_id, userRole, sortBy, queueFilter, primaryFilter, selectedOtherAgentId, userId, agents]);
+  }, [conversations, searchTerm, adminFilters.q, adminFilters.status, adminFilters.agent_id, userRole, sortBy, priorityFilter, tagFilter, queueFilter, primaryFilter, selectedOtherAgentId, userId, agents]);
 
   // Layout dimensions
   const rightWidth = rightPanelOpen ? 330 : 56;
@@ -1389,10 +1415,38 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
                   >
                     <option value="newest">Sort: Newest</option>
                     <option value="oldest">Sort: Oldest</option>
+                    <option value="priority_desc">Sort: Priority (High → Low)</option>
+                    <option value="priority_asc">Sort: Priority (Low → High)</option>
                     <option value="subject">Sort: Subject</option>
                   </select>
                 </div>
               )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+                className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                aria-label="Filter by priority"
+              >
+                <option value="">All Priorities</option>
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+              <select
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+                className="w-full text-xs py-1.5 px-2 border border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                aria-label="Filter by tag"
+              >
+                <option value="">All Tags</option>
+                {availableTags.map((t) => (
+                  <option key={t.id} value={t.name}>{t.name}</option>
+                ))}
+              </select>
             </div>
 
             {/* Customer Search & Reset Button */}
@@ -3256,6 +3310,34 @@ export default function ThreePanelWorkspace({ userRole, userId }: ThreePanelWork
               </Button>
             </div>
             <div className="p-4 space-y-4">
+              {availableTags.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Configured Tags</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableTags.map((t) => {
+                      const already = (selectedConversation?.tags || []).includes(t.name);
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          disabled={already}
+                          onClick={() => setNewTag(t.name)}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                            already
+                              ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed dark:border-slate-800 dark:bg-slate-800'
+                              : newTag === t.name
+                              ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                          }`}
+                        >
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: t.color }} />
+                          {t.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Tag Name</label>
                 <Input

@@ -78,6 +78,9 @@ def list_agent_conversations(
     queue: Optional[str] = Query(None),
     handling: Optional[str] = Query(None),
     filter_type: Optional[str] = Query(None, alias="filter"),
+    priority: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -91,6 +94,9 @@ def list_agent_conversations(
         queue=queue,
         handling=handling,
         filter_type=filter_type,
+        priority=priority,
+        tag=tag,
+        sort_by=sort_by,
         q=q,
         limit=limit,
         offset=offset,
@@ -147,6 +153,7 @@ def _conversation_detail(
         last_message_at=item.get("last_message_at"),
         unread_count=item.get("unread_count", 0),
         merged_into_id=getattr(conversation, "merged_into_id", None),
+        version=getattr(conversation, "version", 1) or 1,
         linked_conversations=[
             ConversationLinkItem.model_validate(l)
             for l in get_linked_conversations_for_conversation(db, conversation.id)
@@ -189,8 +196,20 @@ def send_agent_message(
     if conversation.status in (ConversationStatus.RESOLVED, ConversationStatus.CLOSED):
         raise HTTPException(status_code=409, detail="This conversation is no longer accepting messages")
 
+    # Concurrency & ownership checks
+    from app.services.conversation_service import check_and_bump_version
+    check_and_bump_version(conversation, data.expected_version)
+
+    if not data.is_internal and current_user.role == "agent":
+        if conversation.assigned_agent_id and conversation.assigned_agent_id != current_user.id:
+            owner_name = conversation.assigned_agent.full_name if conversation.assigned_agent else "another agent"
+            raise HTTPException(
+                status_code=409,
+                detail=f"This conversation is currently owned by {owner_name}. Refresh or reassign before replying.",
+            )
+
     # agents replying in queue take it (or must be assigned)
-    if conversation.status in (ConversationStatus.AI_HANDLING, ConversationStatus.PENDING):
+    if conversation.status in (ConversationStatus.AI_HANDLING, ConversationStatus.PENDING, ConversationStatus.OPEN) and not conversation.assigned_agent_id:
         if current_user.role == "agent":
             svc_take(db, conversation, current_user)
             db.flush()
@@ -547,14 +566,33 @@ def get_my_workload(
 
 @router.patch("/availability")
 def set_my_availability(
-    is_available: bool = Query(...),
+    is_available: Optional[bool] = Query(None),
+    availability_status: Optional[str] = Query(None),
+    pause_auto_assignment: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_agent),
 ):
     if current_user.role != "agent":
         raise HTTPException(status_code=403, detail="Only agents can set availability")
-    set_agent_availability(db, current_user.id, is_available)
-    return {"message": f"Availability set to {'available' if is_available else 'unavailable'}"}
+    profile = set_agent_availability(
+        db,
+        current_user.id,
+        is_available=is_available,
+        availability_status=availability_status,
+        pause_auto_assignment=pause_auto_assignment,
+        by_admin=False,
+    )
+    eff = "offline" if (profile and profile.admin_forced_offline) else (profile.availability_status if profile else "offline")
+    if eff == "available" and profile and profile.pause_auto_assignment:
+        eff = "busy"
+    return {
+        "message": f"Availability updated to {eff}",
+        "availability_status": profile.availability_status if profile else "offline",
+        "effective_status": eff,
+        "admin_forced_offline": profile.admin_forced_offline if profile else False,
+        "pause_auto_assignment": profile.pause_auto_assignment if profile else False,
+        "is_available": profile.is_available if profile else False,
+    }
 
 
 @router.get("/agents")

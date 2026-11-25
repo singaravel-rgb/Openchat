@@ -25,6 +25,7 @@ from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.automation_rules import router as automation_rules_router
 from app.api.v1.campaigns import router as campaigns_router
 from app.api.v1.admin_integrations import router as admin_integrations_router
+from app.api.v1.tags import router as tags_router
 
 
 api_router = APIRouter()
@@ -54,3 +55,4 @@ api_router.include_router(webhooks_router)
 api_router.include_router(automation_rules_router)
 api_router.include_router(campaigns_router)
 api_router.include_router(admin_integrations_router)
+api_router.include_router(tags_router)

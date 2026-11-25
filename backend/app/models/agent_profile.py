@@ -21,6 +21,27 @@ class AgentProfile(Base):
         nullable=False,
     )
 
+    availability_status: Mapped[str] = mapped_column(
+        String(20),
+        default="available",
+        server_default="available",
+        nullable=False,
+    )
+
+    admin_forced_offline: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+
+    pause_auto_assignment: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+
     is_approved: Mapped[bool] = mapped_column(
         Boolean,
         default=False,

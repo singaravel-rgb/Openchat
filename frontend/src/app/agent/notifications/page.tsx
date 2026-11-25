@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { notificationApi } from '@/lib/api';
-import type { Notification } from '@/lib/types';
+import type { Notification, NotificationPreferences } from '@/lib/types';
 
 
 const priorityVariant: Record<string, 'danger' | 'warning' | 'success' | 'default' | 'info'> = {
@@ -27,18 +27,39 @@ export default function AgentNotificationsPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showPrefs, setShowPrefs] = useState(false);
+  const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
+  const [savingPrefs, setSavingPrefs] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await notificationApi.list({ limit: 50 });
+      const [data, prefData] = await Promise.all([
+        notificationApi.list({ limit: 50 }),
+        notificationApi.getPreferences().catch(() => null),
+      ]);
       setItems(data.notifications);
       setUnreadCount(data.unread_count);
+      if (prefData) setPrefs(prefData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load notifications');
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  const handleTogglePref = async (key: keyof NotificationPreferences) => {
+    if (!prefs) return;
+    const next = { ...prefs, [key]: !prefs[key] };
+    setPrefs(next);
+    setSavingPrefs(true);
+    try {
+      await notificationApi.updatePreferences(next);
+    } catch {
+      setPrefs(prefs);
+    } finally {
+      setSavingPrefs(false);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -76,10 +97,52 @@ export default function AgentNotificationsPage() {
               {unreadCount > 0 ? `${unreadCount} unread` : 'You are all caught up'}
             </p>
           </div>
-          <Button variant="outline" onClick={handleMarkAllRead} disabled={unreadCount === 0}>
-            Mark all as read
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setShowPrefs((v) => !v)}>
+              {showPrefs ? 'Hide Preferences' : 'Preferences'}
+            </Button>
+            <Button variant="outline" onClick={handleMarkAllRead} disabled={unreadCount === 0}>
+              Mark all as read
+            </Button>
+          </div>
         </div>
+
+        {showPrefs && prefs && (
+          <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Notification Preferences</h2>
+              {savingPrefs && <span className="text-xs text-slate-400">Saving...</span>}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 text-xs">
+              {(
+                [
+                  ['in_app_assigned', 'In-App: Assigned'],
+                  ['in_app_new_message', 'In-App: Customer Reply'],
+                  ['in_app_reassigned', 'In-App: Reassigned'],
+                  ['in_app_pending', 'In-App: Pending'],
+                  ['in_app_sla_warning', 'In-App: SLA Warning'],
+                  ['in_app_sla_breach', 'In-App: SLA Breach'],
+                  ['email_assigned', 'Email: Assigned'],
+                  ['email_new_message', 'Email: Customer Reply'],
+                  ['email_reassigned', 'Email: Reassigned'],
+                  ['email_pending', 'Email: Pending'],
+                  ['email_sla_warning', 'Email: SLA Warning'],
+                  ['email_sla_breach', 'Email: SLA Breach'],
+                ] as Array<[keyof NotificationPreferences, string]>
+              ).map(([key, label]) => (
+                <label key={key} className="flex items-center justify-between rounded border border-slate-100 dark:border-slate-800 px-3 py-2 cursor-pointer">
+                  <span className="text-slate-700 dark:text-slate-300">{label}</span>
+                  <input
+                    type="checkbox"
+                    checked={prefs[key]}
+                    onChange={() => handleTogglePref(key)}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-900/20 dark:text-red-300">
@@ -125,6 +188,11 @@ export default function AgentNotificationsPage() {
                   {notification.reference_type && (
                     <Badge variant="default" className="text-[10px] capitalize">
                       {notification.reference_type.replace('_', ' ')}
+                    </Badge>
+                  )}
+                  {notification.email_status && notification.email_status !== 'not_applicable' && (
+                    <Badge variant={notification.email_sent ? 'success' : 'default'} className="text-[10px]">
+                      Email: {notification.email_status.replace('_', ' ')}
                     </Badge>
                   )}
                 </div>

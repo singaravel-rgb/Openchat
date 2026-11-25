@@ -54,6 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    const hasToken = typeof window !== 'undefined' && Boolean(localStorage.getItem('access_token'));
+    if (hasToken) {
+      authApi.logout().catch(() => {});
+    }
     localStorage.removeItem('access_token');
     setToken(null);
     setUser(null);

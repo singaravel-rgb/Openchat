@@ -45,10 +45,16 @@ def _cfg_or_503(db: Session):
 
 def _public_config(cfg, db: Optional[Session] = None):
     bot_flow_data = None
+    bh_status = {"is_open": True, "out_of_hours_message": None, "timezone": "UTC"}
     if db:
         try:
             from app.services.bot_flow_service import get_active_bot_flow_data
             bot_flow_data = get_active_bot_flow_data(db)
+        except Exception:
+            pass
+        try:
+            from app.services.business_hours_service import get_business_hours_status
+            bh_status = get_business_hours_status(db)
         except Exception:
             pass
     return WidgetPublicConfig(
@@ -65,6 +71,9 @@ def _public_config(cfg, db: Optional[Session] = None):
         show_agent_avatar=cfg.show_agent_avatar,
         require_email=cfg.require_email,
         bot_flow=bot_flow_data,
+        is_business_open=bh_status.get("is_open", True),
+        out_of_hours_message=bh_status.get("out_of_hours_message"),
+        business_timezone=bh_status.get("timezone", "UTC"),
     )
 
 
@@ -226,6 +235,7 @@ def _conv_to_widget(c: Conversation, db: Session) -> WidgetConversation:
         id=c.id, chat_id=c.chat_id, subject=c.subject, status=c.status, updated_at=c.updated_at, created_at=c.created_at,
         last_message=last.content if last else None,
         unread_count=compute_unread_count(db, c, "customer"),
+        agent_last_read_at=getattr(c, "agent_last_read_at", None),
     )
 
 
@@ -355,6 +365,7 @@ async def create_conversation(
 def get_conversation(
     conversation_id: int,
     request: Request,
+    mark_read: bool = Query(False),
     db: Session = Depends(get_db),
     x_widget_session: str | None = Header(None),
 ):
@@ -377,12 +388,12 @@ def get_conversation(
         .order_by(Message.created_at.asc(), Message.id.asc())
         .all()
     )
-    # mark read
-    from datetime import datetime, timezone
-    conversation.customer_last_read_at = datetime.now(timezone.utc)
-    mark_conversation_read_for_user(db, conversation.id, user)
-    db.commit()
-    db.refresh(conversation)
+    if mark_read:
+        from datetime import datetime, timezone
+        conversation.customer_last_read_at = datetime.now(timezone.utc)
+        mark_conversation_read_for_user(db, conversation.id, user)
+        db.commit()
+        db.refresh(conversation)
     return WidgetConversationDetail(**_conv_to_widget(conversation, db).model_dump(), messages=[_msg_to_widget(m) for m in messages])
 
 
@@ -629,19 +640,33 @@ async def request_human(
     if conversation.assigned_agent_id and conversation.status == ConversationStatus.ASSIGNED:
         return {"status": conversation.status, "message": "A human agent is already assisting you."}
 
+    from app.services.business_hours_service import get_business_hours_status
+    bh_status = get_business_hours_status(db)
+
     prev = conversation.status
     conversation.status = ConversationStatus.OPEN
     record_system_event(db, conversation, "Customer requested human assistance", actor_id=user.id)
     append_assignment_history(db, conversation, user.id, "handoff_requested")
     db.flush()
+
+    if not bh_status.get("is_open", True):
+        # Outside business hours: queue for next working period, never promise immediate agent availability
+        db.commit()
+        db.refresh(conversation)
+        return {
+            "status": ConversationStatus.OPEN,
+            "is_business_open": False,
+            "message": bh_status.get("out_of_hours_message") or "We are currently outside our business hours. Your conversation has been queued for our next working period.",
+        }
+
     assigned = assign_conversation_to_agent(db, conversation)
     db.commit()
     db.refresh(conversation)
 
     if conversation.assigned_agent_id and conversation.status == ConversationStatus.ASSIGNED:
         # assignment engine handled it (agent available)
-        return {"status": conversation.status, "message": "Connecting you with a human agent now."}
-    return {"status": ConversationStatus.OPEN, "message": "Your conversation is in the queue. A human agent will assist you shortly."}
+        return {"status": conversation.status, "is_business_open": True, "message": "Connecting you with a human agent now."}
+    return {"status": ConversationStatus.OPEN, "is_business_open": True, "message": "Your conversation is in the queue. A human agent will assist you shortly."}
 
 
 @router.get("/embed.js")

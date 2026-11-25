@@ -5,11 +5,15 @@ from email.utils import formataddr
 from app.core.config import settings
 
 
-def send_email(to_email: str, subject: str, body: str, html_body: str | None = None) -> bool:
-    """Send an email via SMTP. Returns True if sent successfully."""
+def send_email_with_status(
+    to_email: str,
+    subject: str,
+    body: str,
+    html_body: str | None = None,
+) -> tuple[bool, str]:
+    """Send an email via SMTP and return (success, honest_status)."""
     if not settings.smtp_user or not settings.smtp_password:
-        # SMTP not configured; silently skip in dev/demo
-        return False
+        return False, "skipped_unconfigured"
 
     msg = EmailMessage()
     msg["From"] = formataddr((settings.smtp_from_name, settings.smtp_from_email))
@@ -24,14 +28,20 @@ def send_email(to_email: str, subject: str, body: str, html_body: str | None = N
 
     try:
         if settings.smtp_tls:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
                 server.starttls()
                 server.login(settings.smtp_user, settings.smtp_password)
                 server.send_message(msg)
         else:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
                 server.login(settings.smtp_user, settings.smtp_password)
                 server.send_message(msg)
-        return True
+        return True, "sent"
     except Exception:
-        return False
+        return False, "failed"
+
+
+def send_email(to_email: str, subject: str, body: str, html_body: str | None = None) -> bool:
+    """Send an email via SMTP. Returns True if sent successfully."""
+    ok, _ = send_email_with_status(to_email, subject, body, html_body)
+    return ok

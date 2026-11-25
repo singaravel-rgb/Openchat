@@ -18,6 +18,7 @@ class CannedResponse(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    is_shared: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False)
     usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

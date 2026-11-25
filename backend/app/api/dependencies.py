@@ -1,3 +1,4 @@
+import hashlib
 import jwt
 
 from fastapi import Depends, HTTPException, status
@@ -40,9 +41,12 @@ def get_current_user(
     except (jwt.InvalidTokenError, TypeError, ValueError):
         raise credentials_error
 
-    # Immediate session revocation check (e.g. role change or deactivation)
+    # Immediate session revocation check (e.g. logout, role change, password change, or deactivation)
     try:
         if redis_client:
+            token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            if redis_client.get(f"revoked_token:{token_hash}"):
+                raise credentials_error
             revocation_ts = redis_client.get(f"revoked_user:{user_id}")
             if revocation_ts:
                 if isinstance(revocation_ts, bytes):
@@ -58,6 +62,11 @@ def get_current_user(
 
     if not user or not user.is_active:
         raise credentials_error
+
+    if user.password_changed_at and token_iat > 0:
+        pwd_ts = user.password_changed_at.timestamp()
+        if token_iat < pwd_ts - 1.0:
+            raise credentials_error
 
     return user
 

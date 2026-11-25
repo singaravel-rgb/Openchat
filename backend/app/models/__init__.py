@@ -17,6 +17,7 @@ from app.models.message import Message
 from app.models.notification import Notification
 from app.models.password_reset import PasswordResetToken
 from app.models.setting import Setting
+from app.models.tag import Tag
 from app.models.team import Team, Department, user_team_membership
 from app.models.user import User
 from app.models.webhook import Webhook, WebhookDelivery
@@ -54,6 +55,7 @@ __all__ = [
     "Notification",
     "PasswordResetToken",
     "Setting",
+    "Tag",
     "Team",
     "Department",
     "user_team_membership",

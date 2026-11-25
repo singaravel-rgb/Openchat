@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, require_roles
@@ -28,6 +29,8 @@ def create_canned_response(
     current_user: User = Depends(require_agent_or_admin),
 ):
     """Create a canned response (agents and admins)."""
+    # Agents can only create personal replies unless they are admin/super_admin
+    is_shared = data.is_shared if current_user.role in ("admin", "super_admin") else False
     canned = CannedResponse(
         title=data.title,
         content=data.content,
@@ -35,6 +38,7 @@ def create_canned_response(
         shortcut=data.shortcut,
         created_by_id=current_user.id,
         is_active=data.is_active,
+        is_shared=is_shared,
     )
     db.add(canned)
     db.commit()
@@ -46,15 +50,30 @@ def create_canned_response(
 def list_canned_responses(
     category: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
+    q: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_agent_or_admin),
 ):
-    """List canned responses with optional filtering."""
+    """List saved replies (shared + user's personal replies) with optional filtering and search."""
     query = db.query(CannedResponse)
+    if current_user.role not in ("admin", "super_admin"):
+        query = query.filter(
+            or_(CannedResponse.is_shared == True, CannedResponse.created_by_id == current_user.id)  # noqa: E712
+        )
     if category:
         query = query.filter(CannedResponse.category == category)
     if is_active is not None:
         query = query.filter(CannedResponse.is_active == is_active)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                CannedResponse.title.ilike(like),
+                CannedResponse.content.ilike(like),
+                CannedResponse.shortcut.ilike(like),
+                CannedResponse.category.ilike(like),
+            )
+        )
     return query.order_by(CannedResponse.category, CannedResponse.title).all()
 
 
@@ -83,11 +102,14 @@ def update_canned_response(
     if not canned:
         raise HTTPException(status_code=404, detail="Canned response not found")
 
-    # Only creator or admin can update
-    if canned.created_by_id != current_user.id and current_user.role != "admin":
+    # Only creator or admin/super_admin can update
+    if canned.created_by_id != current_user.id and current_user.role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Not authorized to update this canned response")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    if "is_shared" in updates and current_user.role not in ("admin", "super_admin"):
+        updates.pop("is_shared")
+    for field, value in updates.items():
         setattr(canned, field, value)
 
     db.commit()
@@ -106,8 +128,8 @@ def delete_canned_response(
     if not canned:
         raise HTTPException(status_code=404, detail="Canned response not found")
 
-    # Only creator or admin can delete
-    if canned.created_by_id != current_user.id and current_user.role != "admin":
+    # Only creator or admin/super_admin can delete
+    if canned.created_by_id != current_user.id and current_user.role not in ("admin", "super_admin"):
         raise HTTPException(status_code=403, detail="Not authorized to delete this canned response")
 
     db.delete(canned)
